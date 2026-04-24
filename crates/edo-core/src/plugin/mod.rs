@@ -200,7 +200,7 @@ impl PluginImpl for WasmPlugin {
                 .fail()
             }
         }?;
-        Ok(Backend::from_impl(PluginBackend::new(PluginHandle::new(
+        Ok(Backend::new(PluginBackend::new(PluginHandle::new(
             store_ref.clone(),
             handle.clone(),
             farm,

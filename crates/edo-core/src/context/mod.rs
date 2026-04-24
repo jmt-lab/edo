@@ -97,7 +97,7 @@ impl Context {
         // Load the configuration
         let config = Config::load(config).await?;
         // Initialize the storage with the default local cache
-        let storage = Storage::init(&Backend::from_impl(
+        let storage = Storage::init(&Backend::new(
             LocalBackend::new(
                 &Addr::parse("//edo-local-cache")?,
                 &Node::new_definition(
@@ -252,7 +252,7 @@ impl Context {
         );
         let kind = node.get_kind().unwrap();
         let backend = if kind == "local" || kind == "edo:local" {
-            Backend::from_impl(LocalBackend::new(addr, node, self.config()).await?)
+            Backend::new(LocalBackend::new(addr, node, self.config()).await?)
         } else {
             let plugin = self.find_plugin(Component::StorageBackend, node).await?;
             plugin.create_storage(addr, node, self).await?

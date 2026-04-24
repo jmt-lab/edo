@@ -74,7 +74,7 @@ impl PluginImpl for CorePlugin {
     ) -> PluginResult<Backend> {
         let kind = node.get_kind().context(error::NoKindSnafu)?;
         match kind.as_str() {
-            "s3" => Ok(Backend::from_impl(
+            "s3" => Ok(Backend::new(
                 S3Backend::new(addr, node, ctx.config()).await?,
             )),
             _ => error::NoBackendSnafu { kind }.fail().map_err(|e| e.into()),
