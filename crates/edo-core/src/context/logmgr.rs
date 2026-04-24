@@ -8,7 +8,7 @@ use chrono::Local;
 use indicatif::{ProgressState, ProgressStyle};
 use owo_colors::{OwoColorize, Stream};
 use parking_lot::{Mutex, MutexGuard};
-use rand::{rng, Rng};
+use rand::{rng, RngExt};
 use snafu::ResultExt;
 use tokio::fs::{create_dir_all, remove_dir_all};
 use tracing::{

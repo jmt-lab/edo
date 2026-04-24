@@ -11,7 +11,7 @@ exclude = [".edo/", "examples/"]
 
 [workspace.dependencies]
 arc-handle = "1.0"
-astral-tokio-tar = "0.5"
+astral-tokio-tar = "0.6"
 async-compression = { version = "0.4", features = [
     "tokio",
     "zstd",
@@ -22,55 +22,54 @@ async-compression = { version = "0.4", features = [
 ] }
 async-recursion = "1.1"
 async-trait = "0.1"
-aws-config = "1.6"
-aws-credential-types = "1.2"
-aws-sdk-ecr = { version = "1.78", features = ["rustls"] }
-aws-sdk-ecrpublic = { version = "1.74", features = ["rustls"] }
-aws-sdk-s3 = { version = "1.89", features = ["rustls"] }
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-ecr = "1"
+aws-sdk-ecrpublic = "1"
+aws-sdk-s3 = "1"
 base16 = "0.2"
 base64 = "0.22"
 bimap = "0.6"
 blake3 = "1.8"
-bytes = "1.9"
+bytes = "1.11"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 daggy = "0.9"
 dashmap = { version = "6.1", features = ["serde"] }
 derive_builder = "0.20"
-dialoguer = "0.11.0"
-duct = "1.0.0"
+dialoguer = "0.12"
+duct = "1"
 futures = "0.3"
 futures-util = "0.3"
-handlebars = "6.3.2"
+handlebars = "6.4"
 home = "0.5"
-indexmap = "2.9"
+indexmap = "2.14"
 indicatif = "0.17"
 keyring = "3.6"
 merkle_hash = "3.8"
 names = { version = "0.14", features = [], default-features = false }
 ocilot = { git = "https://github.com/awslabs/ocilot.git" }
 once_cell = { version = "1.21", features = ["parking_lot"] }
-os_pipe = "1.2.1"
-owo-colors = { version = "4.2", features = ["supports-colors"] }
+os_pipe = "1.2"
+owo-colors = { version = "4.3", features = ["supports-colors"] }
 parking_lot = { version = "0.12", features = ["send_guard"] }
-rand = "0.9"
-rayon = "1.10"
-regex = "1.11"
-reqwest = { version = "0.12", features = [
-    "rustls-tls",
+rand = "0.10"
+rayon = "1.12"
+regex = "1.12"
+reqwest = { version = "0.13", features = [
     "json",
     "stream",
 ], default-features = false }
 resolvo = { version = "0.9", features = ["serde", "tokio", "version-ranges"] }
 semver = { version = "1.0", features = ["serde"] }
-sha2 = "0.10"
+sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-snafu = "0.8"
+snafu = "0.9"
 starlark = "0.13.0"
-tempfile = "3.20"
-tokio = { version = "1.45", features = [
+tempfile = "3.27"
+tokio = { version = "1.52", features = [
     "full",
     "rt-multi-thread",
     "parking_lot",
@@ -80,9 +79,9 @@ toml = "1"
 tracing = "0.1"
 tracing-indicatif = { version = "0.3" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.16", features = ["v7"] }
+uuid = { version = "1", features = ["v7"] }
 url = "2.5"
 wasmtime = "33.0"
 wasmtime-wasi = "33.0"
 wit-bindgen = "0.42"
-which = "7.0"
+which = "8"
