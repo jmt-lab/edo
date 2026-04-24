@@ -120,13 +120,13 @@ impl PluginImpl for CorePlugin {
             "create transform {addr} with kind {kind}"
         );
         match kind.as_str() {
-            "compose" => Ok(Transform::from_impl(
+            "compose" => Ok(Transform::new(
                 ComposeTransform::new(addr, node, ctx).await?,
             )),
-            "import" => Ok(Transform::from_impl(
+            "import" => Ok(Transform::new(
                 ImportTransform::new(addr, node, ctx).await?,
             )),
-            "script" => Ok(Transform::from_impl(
+            "script" => Ok(Transform::new(
                 ScriptTransform::new(addr, node, ctx).await?,
             )),
             _ => error::NoTransformSnafu { kind }

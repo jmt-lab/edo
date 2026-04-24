@@ -323,7 +323,7 @@ impl PluginImpl for WasmPlugin {
                 .fail()
             }
         }?;
-        Ok(Transform::from_impl(PluginTransform::new(
+        Ok(Transform::new(PluginTransform::new(
             PluginHandle::new(store_ref.clone(), handle.clone(), transform),
         )))
     }

@@ -1,33 +1,34 @@
 use crate::context::{Addr, Handle, Log};
-use crate::def_trait;
 use crate::environment::Environment;
 use crate::storage::{Artifact, Id};
+use arc_handle::arc_handle;
+use async_trait::async_trait;
 use std::path::PathBuf;
 
 pub type TransformResult<T> = std::result::Result<T, error::TransformError>;
 pub use error::TransformError;
 
-def_trait! {
-    "Defines the interface that all transforms must follow" =>
-    "A Transform represents a single action to mutate an artifact" =>
-    Transform: TransformImpl {
-        "Returns the address of the environment farm to use" =>
-        environment() -> TransformResult<Addr>;
-        "Return the transforms unique id that will represent its output" =>
-        get_unique_id(ctx: &Handle) -> TransformResult<Id>;
-        "Returns all dependent transforms of this one" =>
-        depends() -> TransformResult<Vec<Addr>>;
-        "Prepare the transform by fetching all sources and dependent artifacts" =>
-        prepare(log: &Log, ctx: &Handle) -> TransformResult<()>;
-        "Stage all needed files into the environment" =>
-        stage(log: &Log, ctx: &Handle, env: &Environment) -> TransformResult<()>;
-        "Perform the tranformation" =>
-        transform(log: &Log, ctx: &Handle, env: &Environment) -> TransformStatus
-        : "Can a user enter a shell if this transform fails" =>
-        can_shell() -> bool;
-        : "Open a shell in the environment at the appropriate location" =>
-        shell(env: &Environment) -> TransformResult<()>
-    }
+/// A Transform represents an action that transforms a source artifact into another usually
+/// build artifact
+#[arc_handle]
+#[async_trait]
+pub trait Transform {
+    /// Returns the address of the environment farm to use
+    async fn environment(&self) -> TransformResult<Addr>;
+    /// Return the transforms unique id that will represent its output
+    async fn get_unique_id(&self, ctx: &Handle) -> TransformResult<Id>;
+    /// Returns all dependent transforms of this one
+    async fn depends(&self) -> TransformResult<Vec<Addr>>;
+    /// Prepare the transform by fetching all sources and dependent artifacts
+    async fn prepare(&self, log: &Log, ctx: &Handle) -> TransformResult<()>;
+    /// Stage all needed files into the environment
+    async fn stage(&self, log: &Log, ctx: &Handle, env: &Environment) -> TransformResult<()>;
+    /// Perform the transformation
+    async fn transform(&self, log: &Log, ctx: &Handle, env: &Environment) -> TransformStatus;
+    /// Can a user enter a shell if this transform fails
+    fn can_shell(&self) -> bool;
+    /// Open a shell in the environment at the appropriate location
+    fn shell(&self, env: &Environment) -> TransformResult<()>;
 }
 
 pub enum TransformStatus {
