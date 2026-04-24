@@ -81,7 +81,7 @@ tracing-indicatif = { version = "0.3" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v7"] }
 url = "2.5"
-wasmtime = "33.0"
-wasmtime-wasi = "33.0"
-wit-bindgen = "0.42"
+wasmtime = "44.0"
+wasmtime-wasi = "44.0"
+wit-bindgen = "0.57"
 which = "8"

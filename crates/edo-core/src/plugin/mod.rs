@@ -6,6 +6,7 @@ use impl_::transform::PluginTransform;
 use impl_::vendor::PluginVendor;
 use parking_lot::Mutex;
 use snafu::OptionExt;
+use wasmtime::component::HasSelf;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use wasmtime::{AsContextMut, component::Resource};
@@ -108,11 +109,11 @@ impl WasmPlugin {
             .await
             .context(error::IoSnafu)?;
 
-        let engine = Engine::new(wasmtime::Config::default().async_support(true))
+        let engine = Engine::new(&wasmtime::Config::default())
             .context(error::WasmExecSnafu)?;
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker).context(error::WasmExecSnafu)?;
-        bindings::Edo::add_to_linker(&mut linker, |state: &mut host::Host| state)
+        bindings::Edo::add_to_linker::<_, HasSelf<_>>(&mut linker, |state: &mut host::Host| state)
             .context(error::WasmExecSnafu)?;
         let mut store = Store::new(&engine, host::Host::new());
         let component =

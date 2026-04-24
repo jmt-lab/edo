@@ -1,6 +1,6 @@
 use wasmtime::component::Resource;
-use wasmtime_wasi::ResourceTable;
-use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{ResourceTable, WasiCtxView};
+use wasmtime_wasi::{WasiCtx, WasiView};
 
 use crate::context::Component;
 use crate::{
@@ -42,7 +42,7 @@ impl Into<host::Component> for Component {
 
 impl Host {
     pub fn new() -> Self {
-        let wasi = WasiCtxBuilder::new().inherit_stdout().build();
+        let wasi = WasiCtx::builder().inherit_stdout().build();
         Self {
             wasi,
             table: ResourceTable::new(),
@@ -51,14 +51,8 @@ impl Host {
 }
 
 impl WasiView for Host {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-}
-
-impl IoView for Host {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView { ctx: &mut self.wasi, table: &mut self.table }
     }
 }
 
