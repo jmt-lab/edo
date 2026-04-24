@@ -68,7 +68,7 @@ impl FarmImpl for PluginFarm {
             Ok(resource) => {
                 drop(ctx);
                 let handle = PluginHandle::new(self_.store.clone(), self_.handle.clone(), resource);
-                Ok(Environment::from_impl(PluginEnvironment::new(handle)))
+                Ok(Environment::new(PluginEnvironment::new(handle)))
             }
             Err(e) => {
                 drop(ctx);

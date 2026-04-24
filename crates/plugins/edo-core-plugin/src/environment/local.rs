@@ -27,7 +27,7 @@ impl FarmImpl for LocalFarm {
 
     async fn create(&self, _log: &Log, path: &Path) -> EnvResult<Environment> {
         trace!(component = "environment", type = "local", "creating new local environment at path: {}", path.display());
-        Ok(Environment::from_impl(LocalEnv {
+        Ok(Environment::new(LocalEnv {
             path: path.to_path_buf(),
             env: DashMap::new(),
         }))

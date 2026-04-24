@@ -193,7 +193,7 @@ impl FarmImpl for ContainerFarm {
                 .unwrap_or(self.addr.to_string().as_str())
                 .replace('/', "-")
         );
-        Ok(Environment::from_impl(Container {
+        Ok(Environment::new(Container {
             name,
             config: self.config.clone(),
             user: self.user.clone(),

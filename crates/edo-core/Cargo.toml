@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["edo"]
 
 [dependencies]
+arc-handle         = { workspace = true }
 astral-tokio-tar   = { workspace = true }
 async-recursion    = { workspace = true }
 async-trait        = { workspace = true }

@@ -84,8 +84,8 @@ impl PluginImpl for CorePlugin {
     async fn create_farm(&self, addr: &Addr, node: &Node, ctx: &Context) -> PluginResult<Farm> {
         let kind = node.get_kind().context(error::NoKindSnafu)?;
         match kind.as_str() {
-            "local" => Ok(Farm::from_impl(LocalFarm::new(addr, node, ctx).await?)),
-            "container" => Ok(Farm::from_impl(ContainerFarm::new(addr, node, ctx).await?)),
+            "local" => Ok(Farm::new(LocalFarm::new(addr, node, ctx).await?)),
+            "container" => Ok(Farm::new(ContainerFarm::new(addr, node, ctx).await?)),
             _ => error::NoFarmSnafu { kind }.fail().map_err(|e| e.into()),
         }
     }

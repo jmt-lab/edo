@@ -172,6 +172,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dde20b3d026af13f561bdd0f15edf01fc734f0dafcedbaf42bba506a9517f223"
 
 [[package]]
+name = "arc-handle"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4087dd0807d200b2c1a8185b8c0dd7806c5edd996b4893d6c2026b2216557c6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1818,6 +1829,7 @@ dependencies = [
 name = "edo-core"
 version = "0.1.0"
 dependencies = [
+ "arc-handle",
  "astral-tokio-tar",
  "async-recursion",
  "async-trait",
