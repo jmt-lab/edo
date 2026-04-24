@@ -27,7 +27,6 @@ aws-credential-types = "1.2"
 aws-sdk-ecr = { version = "1.78", features = ["rustls"] }
 aws-sdk-ecrpublic = { version = "1.74", features = ["rustls"] }
 aws-sdk-s3 = { version = "1.89", features = ["rustls"] }
-barkml = "0.8.2"
 base16 = "0.2"
 base64 = "0.22"
 bimap = "0.6"
@@ -77,7 +76,7 @@ tokio = { version = "1.45", features = [
     "parking_lot",
 ] }
 tokio-util = "0.7"
-toml = "0.8"
+toml = "1"
 tracing = "0.1"
 tracing-indicatif = { version = "0.3" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

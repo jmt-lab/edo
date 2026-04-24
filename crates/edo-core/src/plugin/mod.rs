@@ -77,7 +77,7 @@ impl FromNode for WasmPlugin {
     async fn from_node(addr: &Addr, node: &Node, ctx: &Context) -> Result<Self> {
         let source_node = node
             .get("source")
-            .or(node.get("wants"))
+            .or(node.get("requires"))
             .context(error::SourceRequiredSnafu)?;
         let source = source_node
             .as_list()

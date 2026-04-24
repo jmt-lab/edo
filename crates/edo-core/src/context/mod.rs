@@ -24,6 +24,7 @@ mod lock;
 mod log;
 mod logmgr;
 mod node;
+mod schema;
 mod starlark;
 pub use address::*;
 pub use builder::*;

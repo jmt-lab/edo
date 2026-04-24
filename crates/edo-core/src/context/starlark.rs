@@ -133,14 +133,14 @@ pub fn starlark_bindings(builder: &mut GlobalsBuilder) {
         Ok(addr.to_string())
     }
 
-    fn wants(
+    fn requires(
         name: String,
         kind: String,
         at: String,
         eval: &mut Evaluator,
     ) -> starlark::Result<String> {
         let node = Node::new_definition(
-            "wants",
+            "requires",
             kind.as_str(),
             name.as_str(),
             BTreeMap::from([(

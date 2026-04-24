@@ -1,6 +1,5 @@
 use super::{error, Addr, Context, ContextResult as Result, FromNode, FromNodeNoContext, Node};
 use async_trait::async_trait;
-use barkml::{Loader, StandardLoader, Walk};
 use home::home_dir;
 use snafu::{OptionExt, ResultExt};
 use std::{collections::BTreeMap, marker::PhantomData, path::Path};
@@ -101,28 +100,16 @@ impl Config {
         let path = if let Some(path) = path {
             path.as_ref().to_path_buf()
         } else {
-            home_dir().context(error::HomeSnafu)?.join(".config/edo")
+            home_dir().context(error::HomeSnafu)?.join(".config/edo.toml")
         };
         if !path.exists() {
             return Ok(Self {
                 configs: BTreeMap::new(),
             });
         }
-        let parent = path.parent().unwrap();
-        let module_name = path.file_name().unwrap();
-        let root = StandardLoader::default()
-            .main(module_name.to_str().unwrap(), vec![parent])
-            .and_then(|x| x.load())
-            .context(error::ParseSnafu)?;
-        let walk = Walk::new(&root);
-        // Now we load all config objects
-        let mut configs = BTreeMap::new();
-        for block_id in walk.get_blocks("config").unwrap_or_default() {
-            let child = walk.walk(&block_id).unwrap();
-            let id: String = child.get_label(0).context(error::ParseSnafu)?;
-            let node = Node::try_from(walk.get_child(&block_id).unwrap())?;
-            configs.insert(id, node);
-        }
+        let bytes = tokio::fs::read(path).await.context(error::IoSnafu)?;
+        let configs = toml::from_slice(&bytes).context(error::DeserializeSnafu)?;
+
         Ok(Self { configs })
     }
 

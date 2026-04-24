@@ -24,7 +24,7 @@ impl FromNode for Dependency {
         _ctx: &Context,
     ) -> std::result::Result<Self, Self::Error> {
         let id = node.get_id().context(error::UndefinedSnafu)?;
-        ensure!(id == "wants", error::UndefinedSnafu {});
+        ensure!(id == "requires", error::UndefinedSnafu {});
         node.validate_keys(&["at"])?;
         let kind = node.get_kind().context(error::UndefinedSnafu)?;
         let name = node.get_name().context(error::UndefinedSnafu)?;

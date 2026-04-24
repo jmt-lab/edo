@@ -14,6 +14,10 @@ pub enum ContextError {
     Io { source: std::io::Error },
     #[snafu(display("dependencies have changed, run edo update to update the lockfile"))]
     DependencyChange,
+    #[snafu(display("failed to deserialize toml: {source}"))]
+    Deserialize {
+        source: toml::de::Error
+    },
     #[snafu(display("failed to initialize logging: {source}"))]
     Log { source: TryInitError },
     #[snafu(display("lockfile is missing resolution data for: {addr}"))]
@@ -44,11 +48,6 @@ pub enum ContextError {
     NotValidSource { id: String },
     #[snafu(display("block is not a vendor definition"))]
     NotVendor,
-    #[snafu(display("failed to parse barkml: {source}"))]
-    Parse {
-        #[snafu(source(from(barkml::Error, Box::new)))]
-        source: Box<barkml::Error>,
-    },
     #[snafu(transparent)]
     Plugin {
         source: crate::plugin::error::PluginError,

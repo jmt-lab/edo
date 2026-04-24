@@ -59,7 +59,6 @@ impl FromNode for ContainerFarm {
             .unwrap_or("root".into());
         let source_node = node
             .get("source")
-            .or(node.get("wants"))
             .context(error::NoSourceSnafu)?;
         let source = source_node
             .as_list()

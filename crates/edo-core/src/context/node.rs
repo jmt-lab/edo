@@ -6,7 +6,7 @@ use parking_lot::RwLock;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use snafu::{OptionExt, ensure};
+use snafu::ensure;
 use starlark::values::Value as StarlarkValue;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,17 +99,6 @@ pub trait FromNode: Sized {
     ) -> std::result::Result<Self, Self::Error>;
 }
 
-impl<'a> TryFrom<&'a barkml::Value> for Node {
-    type Error = error::ContextError;
-
-    fn try_from(value: &'a barkml::Value) -> std::result::Result<Self, Self::Error> {
-        let data = Data::try_from(value)?;
-        Ok(Self {
-            data: Arc::new(RwLock::new(data)),
-        })
-    }
-}
-
 impl<'a> TryFrom<&'a JsonValue> for Node {
     type Error = error::ContextError;
 
@@ -174,93 +163,48 @@ impl<'a, 'v> TryFrom<&'a StarlarkValue<'v>> for Data {
     }
 }
 
-impl<'a> TryFrom<&'a barkml::Value> for Data {
+impl<'a> TryFrom<&'a toml::Value> for Node {
     type Error = error::ContextError;
 
-    fn try_from(value: &'a barkml::Value) -> std::result::Result<Self, Self::Error> {
-        if let Some(value) = value.as_bool() {
-            Ok(Self::Bool(*value))
-        } else if let Some(value) = value.as_int() {
-            Ok(Self::Int(*value))
-        } else if let Some(value) = value.as_float() {
-            Ok(Self::Float(*value))
-        } else if let Some(value) = value.as_string().or(value.as_symbol()) {
-            Ok(Self::String(value.clone()))
-        } else if let Some(value) = value.as_version() {
-            Ok(Self::Version(value.clone()))
-        } else if let Some(value) = value.as_require() {
-            Ok(Self::Require(value.clone()))
-        } else if let Some(value) = value.as_array() {
-            let mut values = Vec::new();
-            for entry in value {
-                values.push(Node::try_from(entry)?);
-            }
-            Ok(Self::List(values))
-        } else if let Some(value) = value.as_table() {
-            let mut table = BTreeMap::new();
-            for (key, value) in value {
-                table.insert(key.clone(), Node::try_from(value)?);
-            }
-            Ok(Self::Table(table))
-        } else {
-            error::NodeSnafu {}.fail()
-        }
-    }
-}
-
-impl<'a> TryFrom<&'a barkml::Statement> for Node {
-    type Error = error::ContextError;
-
-    fn try_from(value: &'a barkml::Statement) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: &'a toml::Value) -> std::result::Result<Self, Self::Error> {
         let data = Data::try_from(value)?;
-        Ok(Self {
+        Ok(Node {
             data: Arc::new(RwLock::new(data)),
         })
     }
 }
 
-impl<'a> TryFrom<&'a barkml::Statement> for Data {
+impl<'a, 'v> TryFrom<&'a toml::Value> for Data {
     type Error = error::ContextError;
 
-    fn try_from(value: &'a barkml::Statement) -> std::result::Result<Self, Self::Error> {
-        if let Some((labels, content)) = value.get_labeled() {
-            let id = value.id.clone();
-            let mut table: BTreeMap<String, Node> = BTreeMap::new();
-            for (key, value) in content.iter() {
-                if let Some(value) = value.get_value() {
-                    table.insert(key.clone(), Node::try_from(value)?);
-                } else if value.get_labeled().is_some() {
-                    // This is a nested definition
-                    table
-                        .entry(value.id.clone())
-                        .or_insert(Node::new_list(vec![]))
-                        .append(Node::try_from(value)?);
-                }
+    fn try_from(value: &'a toml::Value) -> std::result::Result<Self, Self::Error> {
+        if let Some(flag) = value.as_bool() {
+            Ok(Self::new_bool(flag))
+        } else if let Some(string) = value.as_str() {
+            // If we have a string we need to try and fail some things
+            if let Ok(require) = VersionReq::parse(string) {
+                Ok(Self::new_require(require))
+            } else if let Ok(version) = Version::parse(string) {
+                Ok(Self::new_version(version))
+            } else {
+                Ok(Self::new_string(string.to_string()))
             }
-            let kind_value = labels.first().context(error::NodeNoKindSnafu)?;
-            let kind =
-                kind_value
-                    .as_string()
-                    .or(kind_value.as_symbol())
-                    .context(error::FieldSnafu {
-                        field: "kind",
-                        type_: "string/symbol",
-                    })?;
-            let name_value = labels.get(1).context(error::NodeNoNameSnafu)?;
-            let name =
-                name_value
-                    .as_string()
-                    .or(name_value.as_symbol())
-                    .context(error::FieldSnafu {
-                        field: "name",
-                        type_: "string/symbol",
-                    })?;
-            Ok(Self::Definition {
-                id,
-                kind: kind.clone(),
-                name: name.clone(),
-                table,
-            })
+        } else if let Some(float) = value.as_float() {
+            Ok(Self::new_float(float))
+        } else if let Some(int) = value.as_integer() {
+            Ok(Self::new_int(int))
+        } else if let Some(items) = value.as_array() {
+            let mut array = Vec::new();
+            for item in items.iter() {
+                array.push(Node::try_from(item)?);
+            }
+            Ok(Self::new_list(array))
+        } else if let Some(items) = value.as_table() {
+            let mut table = BTreeMap::new();
+            for (key, value) in items.iter() {
+                table.insert(key.clone(), Node::try_from(value)?);
+            }
+            Ok(Self::new_table(table))
         } else {
             error::NodeSnafu {}.fail()
         }
