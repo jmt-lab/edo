@@ -3606,16 +3606,6 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset 0.5.7",
- "indexmap",
-]
-
-[[package]]
-name = "petgraph"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
@@ -3623,6 +3613,7 @@ dependencies = [
  "fixedbitset 0.5.7",
  "hashbrown 0.15.3",
  "indexmap",
+ "serde",
 ]
 
 [[package]]
@@ -4121,9 +4112,9 @@ dependencies = [
 
 [[package]]
 name = "resolvo"
-version = "0.9.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dba027c8e5dd4b5e5a690cfcfb3900d5ffe6985adb048cbd111d5aa596a6c0c8"
+checksum = "57a085c6cecab01bf88df532b7a03f066d5ab92e461bf4614a9de13f562eb163"
 dependencies = [
  "ahash",
  "bitvec",
@@ -4132,7 +4123,7 @@ dependencies = [
  "futures",
  "indexmap",
  "itertools 0.14.0",
- "petgraph 0.7.1",
+ "petgraph 0.8.1",
  "serde",
  "tokio",
  "tracing",
@@ -4214,7 +4205,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4970,10 +4961,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.3",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

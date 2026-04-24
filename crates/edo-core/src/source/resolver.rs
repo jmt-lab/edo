@@ -1,9 +1,7 @@
 use dashmap::DashMap;
 use resolvo::utils::Pool;
 use resolvo::{
-    Candidates, Dependencies, DependencyProvider, Interner, KnownDependencies, NameId, Problem,
-    Requirement, SolvableId, Solver, StringId, UnsolvableOrCancelled, VersionSetId,
-    VersionSetUnionId,
+    Candidates, ConditionalRequirement, Dependencies, DependencyProvider, Interner, KnownDependencies, NameId, Problem, Requirement, SolvableId, Solver, StringId, UnsolvableOrCancelled, VersionSetId, VersionSetUnionId
 };
 use semver::Version;
 use std::fmt;
@@ -49,7 +47,7 @@ impl Resolver {
                 .or_default()
                 .insert(entry.addr.clone());
             let requirement = self.build_requirement(entry)?;
-            requirements.push(requirement);
+            requirements.push(ConditionalRequirement { condition: None, requirement });
         }
         let problem = Problem::new().requirements(requirements);
         let resolution = match solver.solve(problem) {
@@ -227,6 +225,10 @@ impl Interner for Resolver {
     ) -> impl Iterator<Item = VersionSetId> {
         self.pool.resolve_version_set_union(version_set_union)
     }
+
+    fn resolve_condition(&self, condition: resolvo::ConditionId) -> resolvo::Condition {
+        self.pool.resolve_condition(condition).clone()
+    }
 }
 
 impl DependencyProvider for Resolver {
@@ -339,7 +341,10 @@ impl DependencyProvider for Resolver {
                     let vs_id = self
                         .pool
                         .intern_version_set(dep_id, EdoVersionSet::new(matches.as_slice()));
-                    known.requirements.push(Requirement::Single(vs_id));
+                    known.requirements.push(ConditionalRequirement {
+                        condition: None,
+                        requirement: Requirement::Single(vs_id)
+                    });
                 }
             }
             dependencies = Dependencies::Known(known);
