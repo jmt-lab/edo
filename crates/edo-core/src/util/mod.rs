@@ -1,6 +1,5 @@
 mod command;
 mod fs;
-mod handle;
 mod reader;
 mod sync;
 mod writer;
