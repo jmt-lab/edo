@@ -1,18 +1,22 @@
 use super::SourceResult;
 use crate::context::Node;
-use crate::def_trait;
+use arc_handle::arc_handle;
+use async_trait::async_trait;
 use semver::{Version, VersionReq};
 use std::collections::{HashMap, HashSet};
 
-def_trait! {
-    "Defines the interface that all source vendors must implement" =>
-    "A Vendor represents a provider for sources with support for dependency resolution" =>
-    Vendor: VendorImpl {
-        "Get all versions of a given package/source name" =>
-        get_options(name: &str) -> SourceResult<HashSet<Version>>;
-        "Resolve a given name and version into a valid source node" =>
-        resolve(name: &str, version: &Version) -> SourceResult<Node>;
-        "Get all dependency requirements for a given name and version" =>
-        get_dependencies(name: &str, version: &Version) -> SourceResult<Option<HashMap<String, VersionReq>>>
-    }
+/// A Vendor represents a remote provider for sources with support for dependency resolution
+#[arc_handle]
+#[async_trait]
+pub trait Vendor {
+    /// Get all versions of a given package/source name
+    async fn get_options(&self, name: &str) -> SourceResult<HashSet<Version>>;
+    /// Resolve a given name and version into a valid source node
+    async fn resolve(&self, name: &str, version: &Version) -> SourceResult<Node>;
+    /// Get all dependency requirements for a given namme and version
+    async fn get_dependencies(
+        &self,
+        name: &str,
+        version: &Version,
+    ) -> SourceResult<Option<HashMap<String, VersionReq>>>;
 }

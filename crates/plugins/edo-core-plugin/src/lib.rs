@@ -98,11 +98,11 @@ impl PluginImpl for CorePlugin {
             "create source {addr} with kind {kind}"
         );
         match kind.as_str() {
-            "git" => Ok(Source::from_impl(GitSource::new(addr, node, ctx).await?)),
-            "local" => Ok(Source::from_impl(LocalSource::new(addr, node, ctx).await?)),
-            "image" => Ok(Source::from_impl(ImageSource::new(addr, node, ctx).await?)),
-            "remote" => Ok(Source::from_impl(RemoteSource::new(addr, node, ctx).await?)),
-            "vendor" => Ok(Source::from_impl(VendorSource::new(addr, node, ctx).await?)),
+            "git" => Ok(Source::new(GitSource::new(addr, node, ctx).await?)),
+            "local" => Ok(Source::new(LocalSource::new(addr, node, ctx).await?)),
+            "image" => Ok(Source::new(ImageSource::new(addr, node, ctx).await?)),
+            "remote" => Ok(Source::new(RemoteSource::new(addr, node, ctx).await?)),
+            "vendor" => Ok(Source::new(VendorSource::new(addr, node, ctx).await?)),
             _ => error::NoSourceSnafu { kind }.fail().map_err(|e| e.into()),
         }
     }
@@ -138,7 +138,7 @@ impl PluginImpl for CorePlugin {
     async fn create_vendor(&self, addr: &Addr, node: &Node, ctx: &Context) -> PluginResult<Vendor> {
         let kind = node.get_kind().context(error::NoKindSnafu)?;
         match kind.as_str() {
-            "image" => Ok(Vendor::from_impl(ImageVendor::new(addr, node, ctx).await?)),
+            "image" => Ok(Vendor::new(ImageVendor::new(addr, node, ctx).await?)),
             _ => error::NoVendorSnafu { kind }.fail().map_err(|e| e.into()),
         }
     }

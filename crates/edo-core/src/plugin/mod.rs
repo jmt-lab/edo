@@ -282,7 +282,7 @@ impl PluginImpl for WasmPlugin {
                 .fail()
             }
         }?;
-        Ok(Source::from_impl(PluginSource::new(PluginHandle::new(
+        Ok(Source::new(PluginSource::new(PluginHandle::new(
             store_ref.clone(),
             handle.clone(),
             transform,
@@ -362,7 +362,7 @@ impl PluginImpl for WasmPlugin {
                 .fail()
             }
         }?;
-        Ok(Vendor::from_impl(PluginVendor::new(PluginHandle::new(
+        Ok(Vendor::new(PluginVendor::new(PluginHandle::new(
             store_ref.clone(),
             handle.clone(),
             transform,

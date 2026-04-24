@@ -1,7 +1,8 @@
 use crate::context::Log;
-use crate::def_trait;
 use crate::environment::Environment;
 use crate::storage::{Artifact, Id, Storage};
+use arc_handle::arc_handle;
+use async_trait::async_trait;
 use std::path::Path;
 
 mod error;
@@ -17,17 +18,22 @@ pub use resolver::*;
 pub use vendor::*;
 pub use version::*;
 
-def_trait! {
-    "This trait represents the interface all source implementations should follow" =>
-    "A handle to a given implementation of a source" =>
-    Source: SourceImpl {
-        "The unique id for this source" =>
-        get_unique_id() -> SourceResult<Id>;
-        "Fetch the given source to storage" =>
-        fetch(log: &Log, storage: &Storage) -> SourceResult<Artifact>;
-        "Stage the source into the given environment and path" =>
-        stage(log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()>
-    }
+/// A Source represents source code whether locally in project or from an external source
+#[arc_handle]
+#[async_trait]
+pub trait Source {
+    /// The unique id for this source
+    async fn get_unique_id(&self) -> SourceResult<Id>;
+    /// Fetch the given source to storage
+    async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact>;
+    /// Stage the source into the given environment and path
+    async fn stage(
+        &self,
+        log: &Log,
+        storage: &Storage,
+        env: &Environment,
+        path: &Path,
+    ) -> SourceResult<()>;
 }
 
 impl Source {
