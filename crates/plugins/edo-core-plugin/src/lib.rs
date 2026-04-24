@@ -28,7 +28,7 @@ pub mod transform;
 pub mod vendor;
 
 pub fn core_plugin() -> Plugin {
-    Plugin::from_impl(CorePlugin)
+    Plugin::new(CorePlugin)
 }
 
 /// This acts as our inline plugin for all builtin constructs

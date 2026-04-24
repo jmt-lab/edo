@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::storage::{Backend, LocalBackend, Storage};
+use crate::{plugin::WasmPlugin, storage::{Backend, LocalBackend, Storage}};
 
 use super::{
     environment::Farm,
@@ -231,7 +231,7 @@ impl Context {
             component = "context",
             "adding a plugin {addr}"
         );
-        let plugin = Plugin::new(addr, node, self).await?;
+        let plugin = Plugin::new(WasmPlugin::from_node(addr, node, self).await?);
         let log = self.log.create("init").await?;
         log.set_subject(&addr.to_string());
         plugin.fetch(&log, self.storage()).await?;

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use impl_::backend::PluginBackend;
 use impl_::environment::PluginFarm;
 use impl_::handle::PluginHandle;
@@ -23,8 +22,7 @@ pub mod transform;
 
 mod impl_;
 
-use crate::context::{Addr, Component as EdoComponent, Context, Definable, FromNode, Log, Node};
-use crate::def_trait;
+use crate::context::{Addr, Component as EdoComponent, Context, FromNode, Log, Node};
 use crate::environment::Farm;
 use crate::non_configurable;
 use crate::source::Source;
@@ -33,6 +31,8 @@ use crate::{
     storage::{Backend, Storage},
     transform::Transform,
 };
+use arc_handle::arc_handle;
+use async_trait::async_trait;
 use snafu::ResultExt;
 use wasmtime::{
     Engine, Store,
@@ -42,43 +42,28 @@ use wasmtime::{
 pub type Result<T> = std::result::Result<T, error::PluginError>;
 type WasmResult<T> = wasmtime::Result<std::result::Result<T, Resource<error::GuestError>>>;
 
-def_trait! {
-    "Defines the interface plugin implementations should follow" =>
-    "A plugin is a group of sources, environments and transforms" =>
-    Plugin: PluginImpl {
-        "Fetch anything required for this plugin to operate" =>
-        fetch(log: &Log, storage: &Storage) -> Result<()>;
-        "Run any setup steps required for this plugin" =>
-        setup(log: &Log, storage: &Storage) -> Result<()>;
-        "Responds if this plugin supports a component" =>
-        supports(ctx: &Context, component: EdoComponent, kind: String) -> Result<bool>;
-        "Create a storage backend using this plugin" =>
-        create_storage(addr: &Addr, node: &Node, config: &Context) -> Result<Backend>;
-        "Create an environment farm using this plugin" =>
-        create_farm(addr: &Addr, node: &Node, ctx: &Context) -> Result<Farm>;
-        "Create a source using this plugin" =>
-        create_source(addr: &Addr, node: &Node, ctx: &Context) -> Result<Source>;
-        "Create a transform using this plugin" =>
-        create_transform(addr: &Addr, node: &Node, ctx: &Context) -> Result<Transform>;
-        "Create a vendor using this plugin" =>
-        create_vendor(addr: &Addr, node: &Node, ctx: &Context) -> Result<Vendor>
-    }
-}
-
+/// A plugin is a group of sources, environments and transforms implemented in a wasm
+/// binary.
+#[arc_handle]
 #[async_trait]
-impl FromNode for Plugin {
-    type Error = error::PluginError;
-
-    async fn from_node(addr: &Addr, node: &Node, ctx: &Context) -> Result<Self> {
-        let kind = node.get_kind().unwrap();
-        match kind.as_str() {
-            "wasm" => Ok(Plugin::from_impl(WasmPlugin::new(addr, node, ctx).await?)),
-            value => error::UnknownSnafu { kind: value }.fail(),
-        }
-    }
+pub trait Plugin {
+    /// Fetch anything required for this plugin to operate
+    async fn fetch(&self, log: &Log, storage: &Storage) -> Result<()>;
+    /// Run any setup steps required for this plugin
+    async fn setup(&self, log: &Log, storage: &Storage) -> Result<()>;
+    /// Responds if this plugin supports a component
+    async fn supports(&self, ctx: &Context, component: EdoComponent, kind: String) -> Result<bool>;
+    /// Create a storage backend using this plugin
+    async fn create_storage(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Backend>;
+    /// Create an environment farm using this plugin
+    async fn create_farm(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Farm>;
+    /// Create a source using this plugin
+    async fn create_source(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Source>;
+    /// Create a transform using this plugin
+    async fn create_transform(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Transform>;
+    /// Create a vendor using this plugin
+    async fn create_vendor(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Vendor>;
 }
-
-non_configurable!(Plugin, error::PluginError);
 
 #[derive(Clone)]
 pub struct WasmPlugin {
@@ -323,9 +308,11 @@ impl PluginImpl for WasmPlugin {
                 .fail()
             }
         }?;
-        Ok(Transform::new(PluginTransform::new(
-            PluginHandle::new(store_ref.clone(), handle.clone(), transform),
-        )))
+        Ok(Transform::new(PluginTransform::new(PluginHandle::new(
+            store_ref.clone(),
+            handle.clone(),
+            transform,
+        ))))
     }
 
     async fn create_vendor(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Vendor> {
