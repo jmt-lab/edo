@@ -7,7 +7,6 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use snafu::ensure;
-use starlark::values::Value as StarlarkValue;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Component {
@@ -140,26 +139,6 @@ impl<'a> TryFrom<&'a JsonValue> for Data {
             }
             _ => error::NodeSnafu {}.fail(),
         }
-    }
-}
-
-impl<'a, 'v> TryFrom<&'a StarlarkValue<'v>> for Node {
-    type Error = error::ContextError;
-
-    fn try_from(value: &'a StarlarkValue<'v>) -> std::result::Result<Self, Self::Error> {
-        let data = Data::try_from(value)?;
-        Ok(Self {
-            data: Arc::new(RwLock::new(data)),
-        })
-    }
-}
-
-impl<'a, 'v> TryFrom<&'a StarlarkValue<'v>> for Data {
-    type Error = error::ContextError;
-
-    fn try_from(value: &'a StarlarkValue<'v>) -> std::result::Result<Self, Self::Error> {
-        let value: JsonValue = value.to_json_value().unwrap();
-        Self::try_from(&value)
     }
 }
 

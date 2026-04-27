@@ -13,12 +13,22 @@ pub enum Schema {
     V1(SchemaV1),
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct Cache {
+    #[serde(default)]
+    pub source: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    pub build: Option<toml::Value>,
+    #[serde(default)]
+    pub output: Option<toml::Value>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SchemaV1 {
     #[serde(default)]
     pub config: Map<String, toml::Value>,
     #[serde(default)]
-    pub backend: BTreeMap<String, toml::Value>,
+    pub cache: Cache,
     #[serde(default)]
     pub plugin: BTreeMap<String, toml::Value>,
     #[serde(default)]
@@ -41,27 +51,55 @@ fn toml_map(table: &toml::map::Map<String, toml::Value>) -> ContextResult<BTreeM
     Ok(tree)
 }
 
+fn toml_def_item(id: &str, name: &str, inner: &Map<String, toml::Value>) -> ContextResult<Node> {
+    let mut shape = inner.clone();
+    let kind = shape.remove("kind")
+        .and_then(|x| x.as_str().map(|x| x.to_string()))
+        .context(error::FieldSnafu {
+        field: "kind",
+        type_: "string"
+    })?;
+    let node_table = toml_map(&shape)?;
+    Ok(Node::new_definition(id, &kind, name, node_table))
+}
+
 fn toml_def(table: &BTreeMap<String, toml::Value>, id: &str) -> ContextResult<BTreeMap<String, Node>> {
     let mut tree = BTreeMap::new();
     for (name, config) in table.iter() {
         if let Some(inner) = config.as_table() {
-            let mut shape = inner.clone();
-            let kind = shape.remove("kind")
-                .and_then(|x| x.as_str().map(|x| x.to_string()))
-                .context(error::FieldSnafu {
-                field: "kind",
-                type_: "string"
-            })?;
-            let node_table = toml_map(&shape)?;
-            tree.insert(name.clone(), Node::new_definition(id, &kind, name, node_table));
+            tree.insert(name.clone(), toml_def_item(id, name, inner)?);
         }
     }
     Ok(tree)
 }
 
 impl SchemaV1 {
-    pub fn get_backend(&self) -> ContextResult<BTreeMap<String, Node>> {
-        toml_def(&self.backend, "storage")
+    pub fn get_source_caches(&self) -> ContextResult<BTreeMap<String, Node>> {
+        toml_def(&self.cache.source, "backend")
+    }
+
+    pub fn get_build_cache(&self) -> ContextResult<Option<Node>> {
+        if let Some(data) = self.cache.build.as_ref() {
+            let table = data.as_table().context(error::FieldSnafu {
+                field: "build_cache",
+                type_: "table"
+            })?;
+            Ok(Some(toml_def_item("backend", "build_cache", table)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_output_cache(&self) -> ContextResult<Option<Node>> {
+        if let Some(data) = self.cache.output.as_ref() {
+            let table = data.as_table().context(error::FieldSnafu {
+                field: "output_cache",
+                type_: "table"
+            })?;
+            Ok(Some(toml_def_item("backend", "output_cache", table)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn get_config(&self) -> ContextResult<BTreeMap<String, Node>> {

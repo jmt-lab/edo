@@ -1,19 +1,15 @@
 use async_trait::async_trait;
-use futures::future::try_join_all;
 use ocilot::{index::Index, models::Platform, uri::Uri};
 use snafu::ensure;
 use snafu::{OptionExt, ResultExt};
 use std::collections::BTreeSet;
-use std::future::Future;
 use std::path::Path;
-use tokio::task::JoinError;
-use tracing::Instrument;
 
 use edo_core::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo_core::environment::Environment;
 use edo_core::source::{SourceImpl, SourceResult};
 use edo_core::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, Layer, MediaType, Storage,
+    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType, Storage,
 };
 
 /// A OCI Image source is used to fetch

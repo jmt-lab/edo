@@ -68,7 +68,7 @@ impl LogManager {
         self.inner.create(self, id).await
     }
 
-    pub fn acquire(&self) -> MutexGuard<()> {
+    pub fn acquire(&self) -> MutexGuard<'_, ()> {
         self.inner.acquire()
     }
 
@@ -210,7 +210,7 @@ impl Inner {
         Log::new(root, &file_target)
     }
 
-    pub fn acquire(&self) -> MutexGuard<()> {
+    pub fn acquire(&self) -> MutexGuard<'_, ()> {
         self.lock.lock()
     }
 }

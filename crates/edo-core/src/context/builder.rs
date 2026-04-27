@@ -5,18 +5,16 @@ use std::path::{Path, PathBuf};
 use super::Context;
 use super::address::Addr;
 use super::lock::Lock;
-use super::starlark::{Store, starlark_bindings};
 use super::{ContextResult as Result, FromNode, Node, error};
 use crate::context::schema::Schema;
 use crate::source::{Dependency, Resolver};
 use snafu::{OptionExt, ResultExt};
-use starlark::environment::{GlobalsBuilder, Module};
-use starlark::eval::Evaluator;
-use starlark::syntax::{AstModule, Dialect};
 
 pub struct Project {
     project_path: PathBuf,
-    backends: BTreeMap<Addr, Node>,
+    source_caches: BTreeMap<Addr, Node>,
+    build_cache: Option<Node>,
+    output_cache: Option<Node>,
     vendors: BTreeMap<Addr, Node>,
     plugins: BTreeMap<Addr, Node>,
     environments: BTreeMap<Addr, Node>,
@@ -79,7 +77,9 @@ impl Project {
     pub async fn load<P: AsRef<Path>>(path: P, ctx: &Context, error_on_lock: bool) -> Result<()> {
         let mut project = Self {
             project_path: path.as_ref().to_path_buf(),
-            backends: BTreeMap::new(),
+            source_caches: BTreeMap::new(),
+            build_cache: None,
+            output_cache: None,
             vendors: BTreeMap::new(),
             plugins: BTreeMap::new(),
             environments: BTreeMap::new(),
@@ -106,96 +106,10 @@ impl Project {
             {
                 // This is a barkml defined build file
                 self.load_toml(namespace, &path)?;
-            } else if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some("edo") {
-                // This is a starlark build file
-                self.load_starlark(namespace, &path)?;
             } else if path.is_dir() {
                 let dir_name = path.file_name().and_then(|x| x.to_str()).unwrap();
                 let addr = namespace.join(dir_name);
                 self.walk(&addr, &path)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn load_starlark(&mut self, namespace: &Addr, file: &Path) -> Result<()> {
-        let code = std::fs::read_to_string(file).context(error::IoSnafu)?;
-        let ast = AstModule::parse(file.to_str().unwrap(), code, &Dialect::Standard)?;
-        let globals = GlobalsBuilder::standard().with(starlark_bindings).build();
-        let module = Module::new();
-        let store = Store::default();
-        let mut eval = Evaluator::new(&module);
-        eval.extra = Some(&store);
-        eval.eval_module(ast, &globals)?;
-        for node in store.nodes().values() {
-            if let Some(id) = node.get_id() {
-                match id.as_str() {
-                    "source_cache" => {
-                        let addr = namespace.join(node.get_name().unwrap().as_str());
-                        self.backends.insert(addr, node.clone());
-                    }
-                    "output_cache" => {
-                        self.backends
-                            .insert(Addr::parse("//edo-output-cache").unwrap(), node.clone());
-                    }
-                    "build_cache" => {
-                        // The build cache should always be at root address //edo-build-cache
-                        self.backends
-                            .insert(Addr::parse("//edo-build-cache").unwrap(), node.clone());
-                    }
-                    "vendor" => {
-                        let addr = namespace.join(node.get_name().unwrap().as_str());
-                        self.vendors.insert(addr, node.clone());
-                    }
-                    "environment" => {
-                        let addr = namespace.join(node.get_name().unwrap().as_str());
-                        self.environments.insert(addr.clone(), node.clone());
-                        if let Some(node) = node.get("source") {
-                            for entry in node
-                                .as_list()
-                                .unwrap_or(vec![node])
-                                .iter()
-                                .filter(|x| x.get_id() == Some("requires".to_string()))
-                            {
-                                let caddr = addr.join(entry.get_name().unwrap().as_str());
-                                self.need_resolution.insert(caddr, entry.clone());
-                            }
-                        }
-                    }
-                    "transform" => {
-                        let addr = namespace.join(node.get_name().unwrap().as_str());
-                        self.transforms.insert(addr.clone(), node.clone());
-                        if let Some(node) = node.get("source") {
-                            for entry in node
-                                .as_list()
-                                .unwrap_or(vec![node])
-                                .iter()
-                                .filter(|x| x.get_id() == Some("requires".to_string()))
-                            {
-                                let caddr = addr.join(entry.get_name().unwrap().as_str());
-                                self.need_resolution.insert(caddr, entry.clone());
-                            }
-                        }
-                    }
-                    "plugin" => {
-                        let addr = namespace.join(node.get_name().unwrap().as_str());
-                        self.plugins.insert(addr.clone(), node.clone());
-                        if let Some(node) = node.get("source") {
-                            for entry in node
-                                .as_list()
-                                .unwrap_or(vec![node])
-                                .iter()
-                                .filter(|x| x.get_id() == Some("requires".to_string()))
-                            {
-                                let caddr = addr.join(entry.get_name().unwrap().as_str());
-                                self.need_resolution.insert(caddr, entry.clone());
-                            }
-                        }
-                    }
-                    _ => {
-                        continue;
-                    }
-                }
             }
         }
         Ok(())
@@ -216,10 +130,12 @@ impl Project {
                     self.need_resolution.insert(addr.clone(), node.clone());
                     sources.insert(addr, node);
                 }
-                for (name, node) in config.get_backend()? {
+                for (name, node) in config.get_source_caches()? {
                     let addr = namespace.join(&name);
-                    self.backends.insert(addr, node);
+                    self.source_caches.insert(addr, node.clone());
                 }
+                self.build_cache = config.get_build_cache()?;
+                self.output_cache = config.get_output_cache()?;
                 for (name, node) in config.get_plugins()? {
                     let addr = namespace.join(&name);
                     let cnode = handle_sources(namespace, &node, &sources)?;
@@ -266,10 +182,6 @@ impl Project {
                 for (addr, node) in self.plugins.iter() {
                     ctx.add_plugin(addr, node).await?;
                 }
-                // Resolve all storage backends
-                for (addr, node) in self.backends.iter() {
-                    ctx.add_cache(addr, node).await?;
-                }
                 for (addr, node) in self.environments.iter() {
                     ctx.add_farm(addr, node).await?;
                 }
@@ -294,8 +206,14 @@ impl Project {
         }
 
         // Resolve all storage backends
-        for (addr, node) in self.backends.iter() {
+        for (addr, node) in self.source_caches.iter() {
             ctx.add_cache(addr, node).await?;
+        }
+        if let Some(node) = self.build_cache.as_ref() {
+            ctx.add_cache(&Addr::parse("//edo-build-cache")?, node).await?;
+        }
+        if let Some(node) = self.output_cache.as_ref() {
+            ctx.add_cache(&Addr::parse("//edo-output-cache")?, node).await?;
         }
 
         // Vendor's are only used during project resolution

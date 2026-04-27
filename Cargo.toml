@@ -5,7 +5,7 @@ members = [
     "crates/edo",
     "crates/edo-core",
     "crates/edo-plugin-sdk",
-    "crates/edo-starlark", "examples/hello_rust", "crates/plugins/edo-core-plugin",
+    "crates/plugins/edo-core-plugin",
 ]
 exclude = [".edo/", "examples/"]
 
@@ -67,7 +67,6 @@ sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 snafu = "0.9"
-starlark = "0.13.0"
 tempfile = "3.27"
 tokio = { version = "1.52", features = [
     "full",

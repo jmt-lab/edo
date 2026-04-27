@@ -63,8 +63,6 @@ pub enum ContextError {
     },
     #[snafu(display("failed to serialize to json: {source}"))]
     Serialize { source: serde_json::Error },
-    #[snafu(display("failed to handle starlark build file: {reason}"))]
-    Starlark { reason: String },
     #[snafu(transparent)]
     Storage {
         #[snafu(source(from(crate::storage::StorageError, Box::new)))]
@@ -76,12 +74,4 @@ pub enum ContextError {
     },
     #[snafu(transparent)]
     Source { source: crate::source::SourceError },
-}
-
-impl From<starlark::Error> for ContextError {
-    fn from(value: starlark::Error) -> Self {
-        Self::Starlark {
-            reason: value.to_string(),
-        }
-    }
 }
