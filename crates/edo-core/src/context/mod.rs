@@ -1,12 +1,30 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    env::current_dir,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+//! Build context — the central coordinator for an edo build session.
+//!
+//! The [`Context`] struct ties together configuration, storage, logging,
+//! scheduling, plugins, transforms, and environment farms. It is created
+//! once per invocation via [`Context::init`] and threaded through the
+//! entire build pipeline.
+//!
+//! Sub-modules provide supporting types:
+//! - Addressing — hierarchical [`Addr`] identifiers
+//! - Configuration — user-level [`Config`] and the [`Definable`] traits
+//! - Errors — [`ContextError`] and the [`ContextResult`] alias
+//! - Handle — read-only [`Handle`] passed to transforms
+//! - Lock — dependency lock file ([`Lock`])
+//! - Logging — per-task [`Log`] files and [`LogManager`] tracing setup
+//! - Node — generic data tree ([`Node`], [`Data`], [`Component`])
+//! - Schema — TOML schema deserialization
+//! - Builder — project loading and dependency resolution ([`Project`])
 
+use std::collections::{BTreeMap, HashMap};
+use std::env::current_dir;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use dashmap::DashMap;
+use snafu::{OptionExt, ResultExt, ensure};
+use tokio::fs::create_dir_all;
+use tracing::Instrument;
 use crate::{plugin::WasmPlugin, storage::{Backend, LocalBackend, Storage}};
-
 use super::{
     environment::Farm,
     plugin::Plugin,
@@ -25,26 +43,38 @@ mod log;
 mod logmgr;
 mod node;
 mod schema;
+/// Re-exports [`Addr`] and [`Addressable`].
 pub use address::*;
+/// Re-exports [`Project`] and the `non_configurable` macros.
 pub use builder::*;
+/// Re-exports [`Config`], [`Definable`], [`DefinableNoContext`], and [`NonConfigurable`].
 pub use config::*;
-use dashmap::DashMap;
+/// Re-exports [`ContextError`] at the module level.
 pub use error::ContextError;
+/// Re-exports [`Handle`].
 pub use handle::*;
+/// Re-exports [`Lock`].
 pub use lock::*;
+/// Re-exports [`Log`].
 pub use log::*;
+/// Re-exports [`LogManager`], [`LogVerbosity`], and logging helpers.
 pub use logmgr::*;
+/// Re-exports [`Node`], [`Data`], [`Component`], [`FromNode`], and [`FromNodeNoContext`].
 pub use node::*;
 
-use snafu::{OptionExt, ResultExt, ensure};
-use tokio::fs::create_dir_all;
-use tracing::Instrument;
-
+/// Convenience alias for `Result<T, ContextError>`.
 pub type ContextResult<T> = std::result::Result<T, error::ContextError>;
 
 type ArcMap<K, V> = Arc<DashMap<K, V>>;
+
+/// Default subdirectory name for edo's working data (`.edo`).
 const DEFAULT_PATH: &str = ".edo";
 
+/// Central coordinator for an edo build session.
+///
+/// Holds references to configuration, storage, logging, scheduling, and all
+/// registered plugins, transforms, and environment farms. Created once via
+/// [`Context::init`] and shared (via `Clone`) throughout the build.
 #[derive(Clone)]
 pub struct Context {
     /// Project directory
@@ -71,6 +101,8 @@ unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
 
 impl Context {
+    /// Initializes a new build context, setting up logging, configuration,
+    /// storage, and the execution scheduler.
     pub async fn init<ProjectPath, ConfigPath>(
         path: Option<ProjectPath>,
         config: Option<ConfigPath>,
@@ -130,51 +162,60 @@ impl Context {
         Ok(ctx.clone())
     }
 
+    /// Loads the project from the current directory, resolving dependencies
+    /// and registering all components.
     pub async fn load_project(&self, error_on_lock: bool) -> ContextResult<()> {
         Project::load(&self.project_dir, self, error_on_lock).await?;
         Ok(())
     }
 
+    /// Creates a read-only [`Handle`] snapshot for use by transforms during execution.
     pub fn get_handle(&self) -> Handle {
-        Handle {
-            log: self.log.clone(),
-            storage: self.storage.clone(),
-            transforms: self
+        Handle::new(
+            self.log.clone(),
+            self.storage.clone(),
+            self
                 .transforms
                 .iter()
                 .map(|x| (x.key().clone(), x.value().clone()))
                 .collect(),
-            farms: self
+            self
                 .farms
                 .iter()
                 .map(|x| (x.key().clone(), x.value().clone()))
                 .collect(),
-            args: self.args.clone(),
-        }
+            self.args.clone(),
+        )
     }
 
+    /// Returns a reference to the loaded configuration.
     pub fn config(&self) -> &Config {
         &self.config
     }
 
+    /// Returns a reference to the storage manager.
     pub fn storage(&self) -> &Storage {
         &self.storage
     }
 
+    /// Returns a reference to the log manager.
     pub fn log(&self) -> &LogManager {
         &self.log
     }
 
+    /// Returns a reference to the execution scheduler.
     pub fn scheduler(&self) -> &Scheduler {
         &self.scheduler
     }
 
+    /// Prints all registered transform addresses to stdout.
     pub fn print_transforms(&self) {
         for addr in self.transforms.iter() {
             println!("{}", addr.key());
         }
     }
 
+    /// Finds a plugin that supports the given `component` kind from the node.
     pub async fn find_plugin(&self, component: Component, node: &Node) -> ContextResult<Plugin> {
         let kind = node.get_kind().unwrap();
         if let Some((plugin, kind)) = kind.split_once(':') {
@@ -211,10 +252,12 @@ impl Context {
         }
     }
 
+    /// Returns the plugin registered at the given address, if any.
     pub fn get_plugin(&self, addr: &Addr) -> Option<Plugin> {
         self.plugins.get(addr).map(|x| x.value().clone())
     }
 
+    /// Registers a pre-constructed plugin, fetching and setting it up before insertion.
     pub async fn add_preloaded_plugin(&self, addr: &Addr, plugin: &Plugin) -> ContextResult<()> {
         let log = self.log.create("init").await?;
         log.set_subject(&addr.to_string());
@@ -224,6 +267,7 @@ impl Context {
         Ok(())
     }
 
+    /// Creates a new WASM plugin from the given node, fetches and sets it up, then registers it.
     pub async fn add_plugin(&self, addr: &Addr, node: &Node) -> ContextResult<()> {
         // Plugins cannot add other plugins so this is a discrete switch operation
         debug!(
@@ -240,10 +284,13 @@ impl Context {
         Ok(())
     }
 
+    /// Returns the transform registered at the given address, if any.
     pub fn get_transform(&self, addr: &Addr) -> Option<Transform> {
         self.transforms.get(addr).map(|x| x.value().clone())
     }
 
+    /// Registers a storage cache backend, routing it to build, output, or source cache
+    /// based on the address.
     pub async fn add_cache(&self, addr: &Addr, node: &Node) -> ContextResult<()> {
         debug!(
             section = "context",
@@ -273,6 +320,7 @@ impl Context {
         Ok(())
     }
 
+    /// Creates and registers a transform from the given node using the appropriate plugin.
     pub async fn add_transform(&self, addr: &Addr, node: &Node) -> ContextResult<()> {
         debug!(
             section = "context",
@@ -287,6 +335,7 @@ impl Context {
         Ok(())
     }
 
+    /// Removes stale local storage entries for all registered transforms.
     pub async fn prune(&self) -> ContextResult<()> {
         let handle = self.get_handle();
         for transform in self.transforms.iter() {
@@ -296,10 +345,12 @@ impl Context {
         Ok(())
     }
 
+    /// Returns the environment farm registered at the given address, if any.
     pub fn get_farm(&self, addr: &Addr) -> Option<Farm> {
         self.farms.get(addr).map(|x| x.value().clone())
     }
 
+    /// Creates and registers an environment farm from the given node using the appropriate plugin.
     pub async fn add_farm(&self, addr: &Addr, node: &Node) -> ContextResult<()> {
         debug!(
             section = "context",
@@ -313,6 +364,7 @@ impl Context {
         Ok(())
     }
 
+    /// Creates a source fetcher from the given node using the appropriate plugin.
     pub async fn add_source(&self, addr: &Addr, node: &Node) -> ContextResult<Source> {
         debug!(
             section = "context",
@@ -324,12 +376,14 @@ impl Context {
         Ok(result)
     }
 
+    /// Creates a dependency vendor from the given node using the appropriate plugin.
     pub async fn add_vendor(&self, addr: &Addr, node: &Node) -> ContextResult<Vendor> {
         let plugin = self.find_plugin(Component::Vendor, node).await?;
         let result = plugin.create_vendor(addr, node, self).await?;
         Ok(result)
     }
 
+    /// Returns a reference to the command-line arguments map.
     pub fn args(&self) -> &HashMap<String, String> {
         &self.args
     }
@@ -351,6 +405,7 @@ impl Context {
         Ok(())
     }
 
+    /// Sets up environments and executes the build for the given transform address.
     pub async fn run(&self, addr: &Addr) -> ContextResult<()> {
         self.setup_environments().await?;
         self.scheduler().run(self, addr).await?;

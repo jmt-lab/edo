@@ -1,3 +1,13 @@
+//! Log manager and tracing initialization.
+//!
+//! [`LogManager`] owns the log directory, initializes the `tracing` subscriber
+//! with an indicatif progress layer, and creates per-task [`Log`] files.
+//! [`LogVerbosity`] controls the tracing filter level.
+//!
+//! The [`elapsed_subsec`], [`build_sub_unit`], and [`build`] free functions
+//! are progress-bar helpers and demo instrumented tasks used during
+//! development.
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -45,33 +55,42 @@ const TRACE_ONLY: &[&str] = &[
     "wasmtime",
 ];
 
+/// Controls the tracing verbosity level for the log manager.
 #[derive(PartialEq, Eq)]
 pub enum LogVerbosity {
+    /// Emit trace-level and above.
     Trace,
+    /// Emit debug-level and above.
     Debug,
+    /// Emit info-level and above (default).
     Info,
 }
 
+/// Manages the log directory and tracing subscriber for a build session.
 #[derive(Clone)]
 pub struct LogManager {
     inner: Arc<Inner>,
 }
 
 impl LogManager {
+    /// Initializes the log directory at `path` and sets up the tracing subscriber.
     pub async fn init<P: AsRef<Path>>(path: P, verbosity: LogVerbosity) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(Inner::init(path, verbosity).await?),
         })
     }
 
+    /// Creates a new [`Log`] file for the given task `id`.
     pub async fn create(&self, id: &str) -> Result<Log> {
         self.inner.create(self, id).await
     }
 
+    /// Acquires the global output lock, preventing interleaved console output.
     pub fn acquire(&self) -> MutexGuard<'_, ()> {
         self.inner.acquire()
     }
 
+    /// Removes and recreates the log directory.
     pub async fn clear(&self) -> Result<()> {
         self.inner.clear().await
     }
@@ -82,12 +101,14 @@ struct Inner {
     lock: Mutex<()>,
 }
 
+/// Formats the elapsed time as `<seconds>.<tenths>s` for progress bar display.
 pub fn elapsed_subsec(state: &ProgressState, writer: &mut dyn std::fmt::Write) {
     let seconds = state.elapsed().as_secs();
     let sub_seconds = (state.elapsed().as_millis() % 1000) / 100;
     let _ = writer.write_str(&format!("{}.{}s", seconds, sub_seconds));
 }
 
+/// Demo instrumented task that simulates a sub-unit of work with random delay.
 #[instrument]
 pub async fn build_sub_unit(sub_unit: u64) {
     let sleep_time = rng().random_range(Duration::from_millis(5000)..Duration::from_millis(10000));
@@ -98,6 +119,7 @@ pub async fn build_sub_unit(sub_unit: u64) {
     }
 }
 
+/// Demo instrumented task that simulates a build unit composed of sub-units.
 #[instrument]
 pub async fn build(unit: u64) {
     let sleep_time = rng().random_range(Duration::from_millis(2500)..Duration::from_millis(5000));

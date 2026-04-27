@@ -1,15 +1,26 @@
+//! Project loading and build orchestration.
+//!
+//! This module contains [`Project`], which walks a directory tree for `edo.toml`
+//! files, resolves dependencies through vendors, manages the lock file, and
+//! registers plugins, environments, and transforms with the [`super::Context`].
+//! It also re-exports the [`non_configurable!`] and
+//! [`non_configurable_no_context!`] convenience macros.
+
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, read, read_dir};
 use std::path::{Path, PathBuf};
-
+use snafu::{OptionExt, ResultExt};
 use super::Context;
 use super::address::Addr;
 use super::lock::Lock;
 use super::{ContextResult as Result, FromNode, Node, error};
 use crate::context::schema::Schema;
 use crate::source::{Dependency, Resolver};
-use snafu::{OptionExt, ResultExt};
 
+/// Intermediate representation of a loaded edo project.
+///
+/// Holds the parsed configuration nodes collected from `edo.toml` files before
+/// they are resolved and registered with the [`Context`].
 pub struct Project {
     project_path: PathBuf,
     source_caches: BTreeMap<Addr, Node>,
@@ -74,6 +85,8 @@ impl Project {
         Ok(base16::encode_lower(digest.as_bytes()))
     }
 
+    /// Loads all `edo.toml` files under `path`, resolves dependencies, and registers
+    /// plugins, environments, and transforms with the given [`Context`].
     pub async fn load<P: AsRef<Path>>(path: P, ctx: &Context, error_on_lock: bool) -> Result<()> {
         let mut project = Self {
             project_path: path.as_ref().to_path_buf(),
@@ -160,6 +173,8 @@ impl Project {
         Ok(())
     }
 
+    /// Resolves dependencies, registers plugins/environments/transforms, and
+    /// writes the lock file.
     pub async fn build(&mut self, ctx: &Context, error_on_lock: bool) -> Result<()> {
         // Calculate the digest of the project configuration
         let digest = self.calculate_digest()?;
@@ -169,11 +184,11 @@ impl Project {
             let mut file = File::open(&lock_file).context(error::IoSnafu)?;
             let lock: Lock = serde_json::from_reader(&mut file).context(error::SerializeSnafu)?;
             // Now check if the digests match, if so then we should use the lockfile to resolve our unresolved nodes
-            if lock.digest == digest {
+            if lock.digest() == digest {
                 info!(target: "project", "no changes detected in project, reusing lock resolution file");
                 for (addr, node) in self.need_resolution.iter() {
                     let resolved = lock
-                        .content
+                        .content()
                         .get(addr)
                         .context(error::MalformedLockSnafu { addr: addr.clone() })?;
                     node.set_data(&resolved.data());
@@ -190,7 +205,7 @@ impl Project {
                     ctx.add_transform(addr, node).await?;
                 }
                 return Ok(());
-            } else if lock.digest != digest && error_on_lock {
+            } else if lock.digest() != digest && error_on_lock {
                 return error::DependencyChangeSnafu {}.fail();
             }
         }
@@ -256,10 +271,7 @@ impl Project {
             .unwrap()?;
 
         // Create the new lock
-        let mut lock = Lock {
-            digest,
-            ..Default::default()
-        };
+        let mut lock = Lock::new(digest);
 
         for (addr, (vendor_name, name, version)) in resolved.iter() {
             debug!(
@@ -270,7 +282,7 @@ impl Project {
             let vendor = vendors.get(vendor_name).unwrap();
             let target = assigners.get(addr).unwrap();
             let resolved = vendor.resolve(name, version).await?;
-            lock.content.insert(addr.clone(), resolved.clone());
+            lock.content_mut().insert(addr.clone(), resolved.clone());
             target.set_data(&resolved.data());
         }
 
@@ -305,6 +317,7 @@ impl Project {
     }
 }
 
+/// Implements [`Definable`](crate::context::Definable) as a no-op for types that require no configuration.
 #[macro_export]
 macro_rules! non_configurable {
     ($ty: ident, $e: ty) => {
@@ -323,6 +336,7 @@ macro_rules! non_configurable {
     };
 }
 
+/// Implements [`DefinableNoContext`](crate::context::DefinableNoContext) as a no-op for types that require no configuration.
 #[macro_export]
 macro_rules! non_configurable_no_context {
     ($ty: ident, $e: ty) => {

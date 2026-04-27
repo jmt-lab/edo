@@ -1,3 +1,6 @@
 /target/
 **/.edo
 **.lock.json
+.kairos
+.pi
+.pi-lens
