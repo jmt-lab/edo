@@ -2,16 +2,15 @@
 
 ## 1. Overview
 
-The Plugin System is a core architectural feature of Edo that enables extensibility across all components through WebAssembly. This design document details how plugins are structured, discovered, loaded, and executed within the Edo build system.
+The Plugin System is a core architectural feature of Edo that enables extensibility across all pluggable abstractions (Storage, Source, Environment, Transform, Vendor). Plugins are delivered either **in-process** (Rust crates implementing `PluginImpl`) or as **WebAssembly Component Model** modules loaded by the host at runtime. This document details how plugins are declared, discovered, loaded, and executed within Edo.
 
 ## 2. Core Objectives
 
-1. **Component Extensibility**: Allow extension of all core components (Storage, Source, Environment, Transform)
-2. **Multi-implementation Support**: Enable a single plugin to provide multiple implementations of different components
-3. **Language Agnosticism**: Support plugins written in any language that compiles to WebAssembly
-4. **Security**: Provide a secure sandboxed execution environment for plugins
-5. **Discoverability**: Enable easy discovery and registration of plugins
-6. **Versioning**: Support plugin versioning and compatibility checks
+1. **Component Extensibility**: Allow extension of all core abstractions — `Backend` (storage), `Source`, `Vendor`, `Farm`/`Environment`, `Transform`.
+2. **Multi-implementation Support**: Enable a single plugin to provide multiple implementations across different component kinds, dispatched by a `supports(component, kind)` predicate.
+3. **Language Agnosticism**: Any language that can target the WebAssembly Component Model and produce a `world edo` component can implement a plugin.
+4. **Security**: WebAssembly sandbox plus a narrow, explicitly-declared host interface.
+5. **Unified surface**: The same `Plugin` handle type is used for both the builtin in-process plugin and wasm components.
 
 ## 3. Architecture Overview
 
@@ -19,766 +18,463 @@ The Plugin System is a core architectural feature of Edo that enables extensibil
 
 ```mermaid
 graph TD
-    CLI[CLI Interface] --> Engine[Build Engine]
-    Engine --> PluginManager[Plugin Manager]
+    CLI["edo CLI<br/>crates/edo"] --> Ctx["Context<br/>edo-core::context"]
+    Ctx --> Sched["Scheduler<br/>DAG executor"]
+    Ctx --> PluginRegistry["Plugin registry<br/>(Addr → Plugin handle)"]
 
-    PluginManager --> PluginRegistry[Plugin Registry]
-    PluginManager --> WasmRuntime[WebAssembly Runtime]
+    PluginRegistry -->|"in-process<br/>PluginImpl"| CorePlugin["edo-core-plugin<br/>(CorePlugin)"]
+    PluginRegistry -->|"wasmtime<br/>component model"| Wasm["WasmPlugin<br/>(loads *.wasm)"]
 
-    WasmRuntime --> |Loads| PluginModule[Plugin Modules]
+    Wasm -->|imports host| HostIface["Host interface<br/>host.wit"]
+    Wasm -->|exports abi| Guest["Guest component<br/>abi.wit"]
 
-    PluginModule --> |Implements| ComponentInterfaces[Component Interfaces]
+    Guest --> Backend["backend"]
+    Guest --> Environment["environment / farm"]
+    Guest --> Source["source"]
+    Guest --> Transform["transform"]
+    Guest --> Vendor["vendor"]
 
-    ComponentInterfaces --> StorageInterface[Storage Interface]
-    ComponentInterfaces --> SourceInterface[Source Interface]
-    ComponentInterfaces --> EnvironmentInterface[Environment Interface]
-    ComponentInterfaces --> TransformInterface[Transform Interface]
-    ComponentInterfaces --> VendorInterface[Vendor Interface]
+    Ctx --> Storage["Storage registry"]
+    Ctx --> Farms["Farm registry"]
+    Ctx --> Sources["Source registry"]
+    Ctx --> Transforms["Transform registry"]
+    Ctx --> Vendors["Vendor registry"]
 
-    PluginManager --> |Registers| ComponentRegistry[Component Registry]
-
-    ComponentRegistry --> StorageRegistry[Storage Registry]
-    ComponentRegistry --> SourceRegistry[Source Registry]
-    ComponentRegistry --> EnvironmentRegistry[Environment Registry]
-    ComponentRegistry --> TransformRegistry[Transform Registry]
-    ComponentRegistry --> VendorRegistry[Vendor Registry]
+    Sched --> Transforms
 ```
+
+The pipeline is split across two coordinators:
+
+- **`Context`** (`edo-core/src/context/mod.rs`) owns configuration (`edo.toml`), lock state (`edo.lock.json`), the plugin registry, storage, and per-kind registries for farms/sources/transforms/vendors. It is the sole entry point through which plugins create component handles.
+- **`Scheduler`** (`edo-core/src/scheduler/mod.rs`) turns a target transform address into a `Graph` of dependencies and drives execution across a pool of worker tasks. It does **not** talk to plugins directly; it resolves handles via the `Context`.
 
 ### 3.2 Key Abstractions
 
-#### 3.2.1 Plugin
+#### 3.2.1 `Plugin` trait (host side)
 
-A Plugin represents a WebAssembly module that can provide one or more implementations of Edo component interfaces:
+Every plugin — in-process or wasm — is exposed through the same `arc_handle` trait defined in `crates/edo-core/src/plugin/mod.rs`:
 
 ```rust
-pub struct Plugin {
-    id: String,
-    version: Version,
-    module: Module,
-    instance: Instance,
-    exports: HashMap<String, Vec<String>>,
+#[arc_handle]
+#[async_trait]
+pub trait Plugin {
+    async fn fetch(&self, log: &Log, storage: &Storage) -> Result<()>;
+    async fn setup(&self, log: &Log, storage: &Storage) -> Result<()>;
+    async fn supports(&self, ctx: &Context, component: Component, kind: String) -> Result<bool>;
+    async fn create_storage(&self,   addr: &Addr, node: &Node, ctx: &Context) -> Result<Backend>;
+    async fn create_farm(&self,      addr: &Addr, node: &Node, ctx: &Context) -> Result<Farm>;
+    async fn create_source(&self,    addr: &Addr, node: &Node, ctx: &Context) -> Result<Source>;
+    async fn create_transform(&self, addr: &Addr, node: &Node, ctx: &Context) -> Result<Transform>;
+    async fn create_vendor(&self,    addr: &Addr, node: &Node, ctx: &Context) -> Result<Vendor>;
 }
 ```
 
-#### 3.2.2 Plugin Manager
+The `#[arc_handle]` macro generates a `Plugin` handle newtype (`Arc<dyn PluginImpl>`) and a `PluginImpl` implementation trait. `Plugin::new(impl)` wraps any `PluginImpl` in the handle.
 
-The Plugin Manager handles plugin discovery, loading, and registration:
+#### 3.2.2 In-process plugin — `CorePlugin`
 
-```rust
-pub struct PluginManager {
-    registry: PluginRegistry,
-    component_registry: ComponentRegistry,
-    runtime: WasmRuntime,
-}
-```
+`crates/plugins/edo-core-plugin` provides the builtin implementation. It is **not** a wasm component; it is a plain Rust crate that implements `PluginImpl` directly. Its `supports` method encodes the full builtin kind table, and each `create_*` method dispatches on `node.get_kind()`:
 
-#### 3.2.3 Plugin Registry
+| Component       | Built-in kinds                              |
+| --------------- | ------------------------------------------- |
+| Storage backend | `s3`                                        |
+| Environment     | `local`, `container`                        |
+| Source          | `git`, `local`, `image`, `remote`, `vendor` |
+| Transform       | `compose`, `import`, `script`               |
+| Vendor          | `image`                                     |
 
-The Plugin Registry maintains a catalog of available plugins:
+The CLI's `create_context` registers `core_plugin()` under the bare address `edo` and auto-registers a `//default` `local` farm before loading the project.
 
-```rust
-pub struct PluginRegistry {
-    plugins: HashMap<String, Plugin>,
-}
-```
+#### 3.2.3 Wasm plugin — `WasmPlugin`
 
-#### 3.2.4 Component Registry
+`WasmPlugin` (same file) stores a `Source` handle to the plugin's `.wasm` artifact. When first used it:
 
-The Component Registry tracks available implementations for each component type:
+1. Resolves the artifact via `Source::get_unique_id` + `Storage::safe_open`.
+2. Reads the single layer and compiles it into a `wasmtime::component::Component`.
+3. Instantiates it under a `Store<host::Host>` whose `Linker` binds every resource in `host.wit`.
+4. Caches the resulting `Arc<bindings::Edo>` + `Arc<Mutex<Store<_>>>` for subsequent calls.
 
-```rust
-pub struct ComponentRegistry {
-    storage_backends: HashMap<String, Box<dyn StorageBackend>>,
-    sources: HashMap<String, Box<dyn Source>>,
-    environments: HashMap<String, Box<dyn Environment>>,
-    transforms: HashMap<String, Box<dyn Transform>>,
-    vendors: HashMap<String, Box<dyn Vendor>>,
-}
-```
+Each `create_*` call on `Plugin` forwards to the guest export (`abi::create-storage`, `abi::create-farm`, …). The returned guest resource handle is then wrapped by one of the adapter types in `crates/edo-core/src/plugin/impl_/` (`PluginBackend`, `PluginFarm`, `PluginSource`, `PluginTransform`, `PluginVendor`, `PluginHandle`), which implement the native `edo-core` `*Impl` traits and marshal every call back into wasmtime.
 
-## 4. Plugin Discovery and Loading
+#### 3.2.4 Plugin Registry
+
+The `Context` keeps a `BTreeMap<Addr, Plugin>` of registered plugins. Resolution of a user `[source]` / `[transform]` / `[environment]` / `[vendor]` / `[cache]` entry walks the registry and dispatches to the first plugin whose `supports(component, kind)` returns `true`.
+
+## 4. Plugin Declaration and Loading
 
 ### 4.1 Plugin Declaration
 
-Plugins are declared in Starlark build files using the `plugin` function:
+Plugins are declared in `edo.toml` under `[plugin.<name>]` tables. The schema is handled by `crates/edo-core/src/context/schema.rs::SchemaV1::get_plugins`, which wraps the table as a `Node` with `id = "plugin"`, `kind = <kind>`, and `name = <name>`.
 
-```starlark
-plugin(
-    name = "my-plugin",
-    kind = "wasm",
-    source = ["//vendor:my-plugin-1.0.0.wasm"],
-)
+Each entry requires a `kind` and a `source` (or `requires`) field whose value is a **list containing one inline source node** describing how to fetch the `.wasm` artifact. `WasmPlugin::from_node` (see `plugin/mod.rs`) extracts that list's first entry and calls `ctx.add_source(addr, &source)`.
+
+Example — fetching a wasm plugin from a remote URL:
+
+```toml
+schema-version = "1"
+
+[plugin.my-plugin]
+kind = "wasm"
+source = [
+    { kind = "remote", url = "https://example.com/plugins/my-plugin-1.0.0.wasm" },
+]
 ```
+
+Example — pulling a plugin from a local path:
+
+```toml
+[plugin.docker-env]
+kind = "wasm"
+source = [
+    { kind = "local", path = "vendor/docker-env-1.2.0.wasm", is_archive = false },
+]
+```
+
+Example — pulling a plugin from git:
+
+```toml
+[plugin.rust-wasm]
+kind = "wasm"
+source = [
+    { kind = "git", url = "https://github.com/example/rust-wasm-plugin.git", rev = "v0.9.0" },
+]
+```
+
+Note that the plugin _declaration_ supplies only a handle to the wasm artifact. Per-use configuration (bucket, image, flags, …) lives on the `[storage]` / `[environment]` / `[source]` / `[transform]` / `[vendor]` entry that later requests the plugin.
 
 ### 4.2 Plugin Resolution
 
-1. The build engine parses plugin declarations from Starlark files
-2. Each plugin's source is resolved using the Source component
-3. The WASM binary is fetched and stored in the local cache
+1. `Project::collect` walks every `edo.toml` in the workspace and records each `[plugin.<name>]` as a pending registration.
+2. `Project::apply` iterates the collected plugins and calls `ctx.add_plugin(addr, node)` for each (see `crates/edo-core/src/context/builder.rs`).
+3. `ctx.add_plugin` builds a `WasmPlugin` via `FromNode`, which in turn registers the plugin's artifact source with the context.
+4. The source is resolved and the `.wasm` artifact is fetched into the local storage backend (`//edo-local-cache`) on demand.
+
+Note: plugins _cannot_ depend on vendored sources — they must be resolvable before vendors run, since vendors themselves may be provided by plugins.
 
 ### 4.3 Plugin Loading
 
-1. The plugin's WebAssembly module is loaded into the runtime
-2. The module is instantiated with access to host functions
-3. The plugin exports are discovered and registered
+1. On first component creation, `WasmPlugin::load` reads the artifact's layer via `Storage::safe_read`.
+2. `wasmtime::component::Component::new` validates and compiles the wasm component.
+3. A `Linker` is built that wires every `host` resource and helper function (`info` / `warn` / `fatal`).
+4. `bindings::Edo::instantiate_async` produces the guest instance; the resulting `Edo` + `Store` pair is cached inside the plugin.
 
-## 5. Interface Design
+## 5. Interface Design — WIT Package `edo:plugin@1.0.0`
 
-The plugin system uses WebAssembly Interface Types (WIT) to define component interfaces. Instead of a single monolithic interface, we'll organize the interfaces into logical components while maintaining the ability for a single plugin to implement multiple interfaces.
+The plugin contract lives in `crates/edo-wit/` as a pure `.wit` package (it is **not** a Cargo crate; it has no `Cargo.toml`). The host consumes it through `wasmtime::component::bindgen!` and the guest through `wit-bindgen`.
 
-### 5.1 Package Structure
+### 5.1 World
+
+`edo.wit`:
 
 ```wit
-// edo.wit - Package definition
 package edo:plugin@1.0.0;
 
-// Component interfaces
-interface common { ... }
-interface storage { ... }
-interface source { ... }
-interface environment { ... }
-interface transform { ... }
-interface vendor { ... }
-
-// Host interface
-interface host { ... }
-
-// Plugin ABI
-interface abi {
-  use host.{ ... };
-
-  // Multiple implementations in one plugin
-  create-storage: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<backend, error>;
-  create-farm: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<farm, error>;
-  create-source: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<source, error>;
-  create-transform: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<transform, error>;
-  create-vendor: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<vendor, error>;
-}
-
-// World definition
 world edo {
-  use host.{ ... };
-  import host;
-  export abi;
+    use host.{node, error};
+    import host;
+
+    export abi;
 }
 ```
 
-### 5.2 Common Interface
+The world is deliberately flat: plugins **import** the `host` interface (host-owned resources they can call into) and **export** the `abi` interface (guest-owned resources and factory functions the host calls).
 
-The common interface defines shared types and functionality:
+### 5.2 Host Interface (imported by the guest)
 
-```wit
-// common.wit
-interface common {
-  // Error handling
-  resource error {
-    constructor(plugin: string, message: string);
-    to-string: func() -> string;
-  }
+Defined in `host.wit`. The host provides:
 
-  // Logging
-  info: func(message: string);
-  warn: func(message: string);
-  fatal: func(message: string);
+- `enum component { storage-backend, environment, source, transform, vendor }`
+- I/O: `resource reader`, `resource writer`
+- Identity / artifacts: `resource id`, `resource layer`, `resource artifact-config`, `resource artifact`, `resource storage`
+- Config: `resource config` (`get(name) -> option<node>`)
+- Logging: `resource log` with `write`; free functions `info`, `warn`, `fatal`
+- Command building: `resource command` (`set`, `chdir`, `pushd`, `popd`, `create-named-dir`, `create-dir`, `remove-dir`, `remove-file`, `mv`, `copy`, `run`, `send`)
+- Build envs: `resource environment` (the host's live environment), `resource farm`
+- Source / transform handles the host can hand back into the guest: `resource source`, `resource transform`, `resource handle`
+- Build context: `resource context` (`get-arg`, `get-handle`, `config`, `storage`, `get-transform`, `get-farm`, `add-source`)
+- Config payload: `resource node` (`validate-keys`, `as-bool` / `as-int` / `as-float` / `as-string` / `as-version` / `as-require` / `as-list` / `as-table`, `get-id` / `get-kind` / `get-name` / `get-table`) and `record definition { id, kind, name, table }`
+- Error type: `resource error` (`constructor(plugin, message)`, `to-string`)
+- Shared status: `variant transform-status { success(artifact), retryable(tuple<option<string>, error>), failed(tuple<option<string>, error>) }`
 
-  // Artifact ID
-  resource id {
-    constructor(name: string, digest: string, version: option<string>, pkg: option<string>, arch: option<string>);
-    name: func() -> string;
-    digest: func() -> string;
-    set-digest: func(digest: string);
-    version: func() -> option<string>;
-    set-version: func(input: string);
-    clear-version: func();
-    pkg: func() -> option<string>;
-    arch: func() -> option<string>;
-    from-string: static func(input: string) -> id;
-  }
+All paths the host may hand to a guest are referenced via borrowed resource handles — guests never get raw pointers or arbitrary FS access.
 
-  // Config node handling
-  resource node {
-    validate-keys: func(keys: list<string>) -> result<_, error>;
-    as-bool: func() -> option<bool>;
-    as-int: func() -> option<s64>;
-    as-float: func() -> option<f64>;
-    as-string: func() -> option<string>;
-    as-version: func() -> option<string>;
-    as-require: func() -> option<string>;
-    as-list: func() -> option<list<node>>;
-    as-table: func() -> option<list<tuple<string, node>>>;
-    get-id: func() -> option<string>;
-    get-kind: func() -> option<string>;
-    get-name: func() -> option<string>;
-    get-table: func() -> option<list<tuple<string, node>>>;
-  }
+### 5.3 Guest ABI (exported by the plugin)
 
-  // Context for plugin operations
-  resource context {
-    get-arg: func(name: string) -> option<string>;
-    get-handle: func() -> handle;
-    config: func() -> config;
-    storage: func() -> storage;
-    get-transform: func(addr: string) -> option<transform>;
-    get-farm: func(addr: string) -> option<farm>;
-    add-source: func(addr: string, node: borrow<node>) -> result<source, error>;
-  }
-
-  // I/O
-  resource reader {
-    read: func(size: u64) -> result<list<u8>, error>;
-  }
-
-  resource writer {
-    write: func(data: list<u8>) -> result<u64, error>;
-  }
-}
-```
-
-### 5.3 Storage Interface
+Defined in `abi.wit`. Each plugin exports six resource types plus six top-level functions:
 
 ```wit
-// storage.wit
-interface storage {
-  use common.{ id, error, reader, writer };
-
-  // Layer representation
-  resource layer {
-    media-type: func() -> string;
-    digest: func() -> string;
-    size: func() -> u64;
-    platform: func() -> option<string>;
-  }
-
-  // Artifact configuration
-  resource artifact-config {
-    constructor(id: borrow<id>, provides: list<string>, metadata: option<string>);
-    id: func() -> id;
-    provides: func() -> list<string>;
-    requires: func() -> list<tuple<string, list<tuple<string, string>>>>;
-    add-requirement: func(group: string, name: string, version: string);
-  }
-
-  // Artifact representation
-  resource artifact {
-    constructor(config: borrow<artifact-config>);
-    config: func() -> artifact-config;
-    layers: func() -> list<layer>;
-    add-layer: func(layer: borrow<layer>);
-  }
-
-  // Storage backend interface
-  resource backend {
-    ls: func() -> result<list<id>, error>;
-    has: func(id: borrow<id>) -> result<bool, error>;
-    open: func(id: borrow<id>) -> result<artifact, error>;
-    save: func(artifact: borrow<artifact>) -> result<_, error>;
-    del: func(id: borrow<id>) -> result<_, error>;
-    copy: func(source: borrow<id>, target: borrow<id>) -> result<_, error>;
-    prune: func(id: borrow<id>) -> result<_, error>;
-    prune-all: func() -> result<_, error>;
-    read: func(layer: borrow<layer>) -> result<reader, error>;
-    start-layer: func() -> result<writer, error>;
-    finish-layer: func(media-type: string, platform: option<string>, writer: borrow<writer>) -> result<layer, error>;
-  }
-
-  // Storage manager interface (host-provided)
-  resource storage-manager {
-    open: func(id: borrow<id>) -> result<artifact, error>;
-    read: func(layer: borrow<layer>) -> result<reader, error>;
-    start-layer: func() -> result<writer, error>;
-    finish-layer: func(media-type: string, platform: option<string>, writer: borrow<writer>) -> result<layer, error>;
-    save: func(artifact: borrow<artifact>) -> result<_, error>;
-  }
-}
-```
-
-### 5.4 Source Interface
-
-```wit
-// source.wit
-interface source {
-  use common.{ id, error, node, context };
-  use storage.{ artifact, storage-manager };
-
-  // Source interface
-  resource source {
-    get-unique-id: func() -> result<id, error>;
-    fetch: func(log: borrow<log>, storage: borrow<storage-manager>) -> result<artifact, error>;
-    stage: func(log: borrow<log>, storage: borrow<storage-manager>, env: borrow<environment>, path: string) -> result<_, error>;
-  }
-
-  // Vendor interface
-  resource vendor {
-    get-options: func(name: string) -> result<list<string>, error>;
-    resolve: func(name: string, version: string) -> result<node, error>;
-    get-dependencies: func(name: string, version: string) -> result<option<list<tuple<string, string>>>, error>;
-  }
-
-  // Log interface
-  resource log {
-    write: func(message: list<u8>) -> result<u64, error>;
-  }
-}
-```
-
-### 5.5 Environment Interface
-
-```wit
-// environment.wit
-interface environment {
-  use common.{ error, reader, writer, id };
-  use source.{ log };
-  use storage.{ storage-manager };
-
-  // Command interface
-  resource command {
-    set: func(key: string, value: string) -> result<_, error>;
-    chdir: func(path: string) -> result<_, error>;
-    pushd: func(path: string) -> result<_, error>;
-    popd: func();
-    create-named-dir: func(key: string, path: string) -> result<_, error>;
-    create-dir: func(path: string) -> result<_, error>;
-    remove-dir: func(path: string) -> result<_, error>;
-    remove-file: func(path: string) -> result<_, error>;
-    mv: func(source: string, target: string) -> result<_, error>;
-    copy: func(source: string, target: string) -> result<_, error>;
-    run: func(cmd: string) -> result<_, error>;
-    send: func(path: string) -> result<_, error>;
-  }
-
-  // Environment interface
-  resource environment {
-    defer-cmd: func(log: borrow<log>, id: borrow<id>) -> command;
-    expand: func(path: string) -> result<string, error>;
-    create-dir: func(path: string) -> result<_, error>;
-    set-env: func(key: string, value: string) -> result<_, error>;
-    get-env: func(key: string) -> option<string>;
-    setup: func(log: borrow<log>, storage: borrow<storage-manager>) -> result<_, error>;
-    up: func(log: borrow<log>) -> result<_, error>;
-    down: func(log: borrow<log>) -> result<_, error>;
-    clean: func(log: borrow<log>) -> result<_, error>;
-    write: func(path: string, data: borrow<reader>) -> result<_, error>;
-    unpack: func(path: string, data: borrow<reader>) -> result<_, error>;
-    read: func(path: string, writer: borrow<writer>) -> result<_, error>;
-    cmd: func(log: borrow<log>, id: borrow<id>, path: string, command: string) -> result<bool, error>;
-    run: func(log: borrow<log>, id: borrow<id>, path: string, command: borrow<command>) -> result<bool, error>;
-    shell: func(path: string) -> result<_, error>;
-  }
-
-  // Farm interface
-  resource farm {
-    setup: func(log: borrow<log>, storage: borrow<storage-manager>) -> result<_, error>;
-    create: func(log: borrow<log>, path: string) -> result<environment, error>;
-  }
-}
-```
-
-### 5.6 Transform Interface
-
-```wit
-// transform.wit
-interface transform {
-  use common.{ id, error };
-  use source.{ log };
-  use storage.{ artifact, storage-manager };
-  use environment.{ environment };
-
-  // Handle for transform operations
-  resource handle {
-    storage: func() -> storage-manager;
-    get: func(addr: string) -> option<transform>;
-  }
-
-  // Transform status
-  variant transform-status {
-    success(artifact),
-    retryable(tuple<option<string>, error>),
-    failed(tuple<option<string>, error>)
-  }
-
-  // Transform interface
-  resource transform {
-    environment: func() -> result<string, error>;
-    depends: func() -> result<list<string>, error>;
-    get-unique-id: func(ctx: borrow<handle>) -> result<id, error>;
-    prepare: func(log: borrow<log>, ctx: borrow<handle>) -> result<_, error>;
-    stage: func(log: borrow<log>, ctx: borrow<handle>, env: borrow<environment>) -> result<_, error>;
-    transform: func(log: borrow<log>, ctx: borrow<handle>, env: borrow<environment>) -> transform-status;
-    can-shell: func() -> bool;
-    shell: func(env: borrow<environment>) -> result<_, error>;
-  }
-}
-```
-
-### 5.7 Host Interface
-
-The host interface provides access to Edo's core functionality from plugins:
-
-```wit
-// host.wit
-interface host {
-  use common.{ id, error, node, context, reader, writer };
-  use storage.{ artifact, layer, artifact-config, storage-manager };
-  use source.{ log };
-  use environment.{ environment, command, farm };
-  use transform.{ transform, handle, transform-status };
-
-  // Config access
-  resource config {
-    get: func(name: string) -> option<node>;
-  }
-
-  // Host-provided utility functions
-  info: func(message: string);
-  warn: func(message: string);
-  fatal: func(message: string);
-}
-```
-
-### 5.8 Plugin ABI Interface
-
-The ABI interface defines the entry points for creating component implementations:
-
-```wit
-// abi.wit
 interface abi {
-  use common.{ node, error, context };
-  use storage.{ backend };
-  use source.{ source, vendor };
-  use environment.{ farm };
-  use transform.{ transform };
+    use host.{ /* everything the guest needs */ };
 
-  // Create component implementations
-  create-storage: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<backend, error>;
-  create-farm: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<farm, error>;
-  create-source: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<source, error>;
-  create-transform: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<transform, error>;
-  create-vendor: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<vendor, error>;
+    resource backend     { /* ls, has, open, save, del, copy, prune,
+                              prune-all, read, start-layer, finish-layer */ }
+    resource environment { /* expand, create-dir, set-env, get-env, setup,
+                              up, down, clean, write, unpack, read, cmd,
+                              run, shell */ }
+    resource farm        { /* setup, create */ }
+    resource source      { /* get-unique-id, fetch, stage */ }
+    resource transform   { /* environment, depends, get-unique-id, prepare,
+                              stage, transform, can-shell, shell */ }
+    resource vendor      { /* get-options, resolve, get-dependencies */ }
+
+    supports: func(component: component, kind: string) -> bool;
+
+    create-storage:   func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<backend,     error>;
+    create-farm:      func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<farm,        error>;
+    create-source:    func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<source,      error>;
+    create-transform: func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<transform,   error>;
+    create-vendor:    func(addr: string, node: borrow<node>, ctx: borrow<context>) -> result<vendor,      error>;
 }
 ```
+
+Key points:
+
+- Each guest resource mirrors the native Rust `*Impl` trait in `edo-core`. Methods on the wasm resource correspond 1:1 with methods on the adapter type in `crates/edo-core/src/plugin/impl_/`.
+- `supports(component, kind)` is the single dispatch predicate the host uses when resolving a user `kind = "…"`.
+- The guest is free to return an `error` from any factory that does not understand the given kind.
+- The `transform` resource's `transform(...)` method returns `transform-status`, not a `result<_, error>`, so a transform can cleanly signal `retryable` vs `failed` without exceptions crossing the boundary.
 
 ## 6. Plugin Implementation
 
-### 6.1 Plugin Instance
+### 6.1 Guest SDK — `edo-plugin-sdk`
 
-Each plugin instance consists of:
+Third-party plugin authors depend on `crates/edo-plugin-sdk`, which:
 
-1. **WebAssembly Module**: The compiled code
-2. **Capabilities**: Defined permissions for the plugin
-3. **Exports**: The component implementations provided by the plugin
-4. **State**: Any persistent state maintained by the plugin
+- Re-exports `wit-bindgen`-generated `bindings` for `edo:plugin@1.0.0`.
+- Provides a `stub::Stub` type that implements every `Guest*` trait from `abi.wit` with a `NotImplemented` error so authors only implement the resources they actually need.
 
-### 6.2 Example Plugin Implementation (Rust)
+### 6.2 Example Plugin (Rust, wasm component)
 
 ```rust
-use edo_plugin::{abi, common, storage, source, environment, transform};
+use edo_plugin_sdk::bindings::exports::edo::plugin::abi;
+use edo_plugin_sdk::bindings::edo::plugin::host::{Component, Node, Context, Error};
+use edo_plugin_sdk::stub::Stub;
 
-struct MyStorageBackend {
-    // Implementation details
+struct MyStorageBackend { /* … */ }
+
+impl abi::GuestBackend for MyStorageBackend {
+    // Implement ls / has / open / save / del / copy / prune /
+    // prune-all / read / start-layer / finish-layer.
 }
 
-impl storage::Backend for MyStorageBackend {
-    // Implement storage backend methods
+struct MyExports;
+
+impl abi::Guest for MyExports {
+    type Backend     = MyStorageBackend;
+    type Environment = <Stub as abi::Guest>::Environment;
+    type Farm        = <Stub as abi::Guest>::Farm;
+    type Source      = <Stub as abi::Guest>::Source;
+    type Transform   = <Stub as abi::Guest>::Transform;
+    type Vendor      = <Stub as abi::Guest>::Vendor;
+
+    fn supports(component: Component, kind: String) -> bool {
+        matches!(component, Component::StorageBackend) && kind == "my-backend"
+    }
+
+    fn create_storage(addr: String, node: &Node, ctx: &Context)
+        -> Result<abi::Backend, Error>
+    {
+        let backend = MyStorageBackend::from_node(&addr, node, ctx)?;
+        Ok(abi::Backend::new(backend))
+    }
+
+    fn create_farm(_: String, _: &Node, _: &Context)      -> Result<abi::Farm,      Error> { Stub::create_farm(_1, _2, _3)      }
+    fn create_source(_: String, _: &Node, _: &Context)    -> Result<abi::Source,    Error> { Stub::create_source(_1, _2, _3)    }
+    fn create_transform(_: String, _: &Node, _: &Context) -> Result<abi::Transform, Error> { Stub::create_transform(_1, _2, _3) }
+    fn create_vendor(_: String, _: &Node, _: &Context)    -> Result<abi::Vendor,    Error> { Stub::create_vendor(_1, _2, _3)    }
 }
 
-struct MySourceProvider {
-    // Implementation details
-}
-
-impl source::Source for MySourceProvider {
-    // Implement source provider methods
-}
-
-// Export plugin entry points
-#[export_name = "create-storage"]
-fn create_storage(addr: &str, node: &common::Node, ctx: &common::Context) -> Result<storage::Backend, common::Error> {
-    // Initialize and return a storage backend
-    Ok(MyStorageBackend::new(addr, node, ctx))
-}
-
-#[export_name = "create-source"]
-fn create_source(addr: &str, node: &common::Node, ctx: &common::Context) -> Result<source::Source, common::Error> {
-    // Initialize and return a source provider
-    Ok(MySourceProvider::new(addr, node, ctx))
-}
-
-// No implementation for other component types
-#[export_name = "create-farm"]
-fn create_farm(_addr: &str, _node: &common::Node, _ctx: &common::Context) -> Result<environment::Farm, common::Error> {
-    Err(common::Error::new("my-plugin", "Farm implementation not available"))
-}
-
-#[export_name = "create-transform"]
-fn create_transform(_addr: &str, _node: &common::Node, _ctx: &common::Context) -> Result<transform::Transform, common::Error> {
-    Err(common::Error::new("my-plugin", "Transform implementation not available"))
-}
-
-#[export_name = "create-vendor"]
-fn create_vendor(_addr: &str, _node: &common::Node, _ctx: &common::Context) -> Result<source::Vendor, common::Error> {
-    Err(common::Error::new("my-plugin", "Vendor implementation not available"))
-}
+edo_plugin_sdk::bindings::export!(MyExports with_types_in edo_plugin_sdk::bindings);
 ```
+
+Compile with a component-model-capable target (e.g. `cargo build --target wasm32-wasip2`) and distribute the resulting `.wasm`.
+
+### 6.3 In-process plugins
+
+Writing a builtin-style plugin means implementing `PluginImpl` on a Rust type, wrapping it with `Plugin::new(MyPlugin)`, and registering the resulting handle with the context during bootstrap. `crates/plugins/edo-core-plugin/src/lib.rs` is the reference implementation — there is no wasm toolchain step for this path.
 
 ## 7. Plugin Lifecycle
 
-The lifecycle of a plugin includes:
+### 7.1 Declaration → Registration
 
-### 7.1 Discovery
+1. `SchemaV1` parses `[plugin.<name>]` entries from every `edo.toml` in the project.
+2. `Project::apply` registers each plugin with the `Context` under `//<project>/<name>`.
+3. The plugin's artifact source is registered with the `Context` so it can be resolved like any other source.
 
-1. Plugin declarations are parsed from Starlark build files
-2. The Plugin Manager catalogs available plugins
-3. Plugin sources are resolved using the Source component
+### 7.2 Fetch + Setup
 
-### 7.2 Loading
+1. Before scheduling starts, `Context` calls `Plugin::fetch` for every registered plugin — `WasmPlugin::fetch` pulls the `.wasm` artifact into `//edo-local-cache` via `Source::cache`.
+2. `Plugin::setup` is then called, giving each plugin a chance to perform one-time initialisation.
 
-1. The plugin WASM binary is fetched to local storage
-2. The WebAssembly runtime loads and validates the module
-3. The module is instantiated with access to host functions
-4. Available exports are discovered and registered
+### 7.3 Component Creation
 
-### 7.3 Initialization
+1. When `Context` resolves a `[storage]` / `[environment]` / `[source]` / `[transform]` / `[vendor]` entry, it iterates the plugin registry and calls `supports(component, kind)` on each.
+2. The first matching plugin's `create_*` is called with the entry's `Addr` + `Node` + `Context`.
+3. For `WasmPlugin`, the call crosses the wasm boundary; the returned resource is wrapped in a `PluginBackend` / `PluginFarm` / `PluginSource` / `PluginTransform` / `PluginVendor` adapter (see `crates/edo-core/src/plugin/impl_/`).
 
-1. Each component implementation is initialized with its configuration
-2. The implementation is registered with the appropriate component registry
-3. The plugin's capabilities are configured based on its requirements
+```mermaid
+sequenceDiagram
+    participant Ctx as Context
+    participant Plugin as WasmPlugin
+    participant Wasmtime as wasmtime runtime
+    participant Guest as Guest .wasm
+
+    Ctx->>Plugin: create_transform(addr, node, ctx)
+    Plugin->>Wasmtime: call abi.create-transform(...)
+    Wasmtime->>Guest: invoke export
+    Guest-->>Wasmtime: transform resource handle
+    Wasmtime-->>Plugin: Resource<Transform>
+    Plugin-->>Ctx: Transform (PluginTransform adapter)
+    Ctx->>Plugin: transform.get_unique_id(handle)
+    Plugin->>Wasmtime: call on guest resource
+    Wasmtime->>Guest: resource method
+    Note over Guest,Wasmtime: Guest may call back into host<br/>(storage, log, command builder, …)
+```
 
 ### 7.4 Execution
 
-1. Component registries dispatch calls to the appropriate implementation
-2. The WebAssembly runtime handles memory isolation and resource limits
-3. Results are passed back to the Edo core
+The `Scheduler` drives the DAG and invokes methods on the component handles. For wasm plugins, every call is marshalled through wasmtime and back. The host may pass host-owned resources (`log`, `storage`, `environment`, `handle`, `id`) to the guest by borrowed reference, and the guest may call back into them.
 
-### 7.5 Unloading
+### 7.5 Teardown
 
-1. When a build is complete, plugin resources can be released
-2. Long-lived plugins may remain loaded for future builds
+The `Context` drops the plugin registry at the end of the session; wasmtime stores and components are released with their owning `WasmPlugin`.
 
 ## 8. Security Model
 
-The Plugin System employs several security measures:
-
 ### 8.1 Isolation
 
-WebAssembly provides strong isolation guarantees:
-- Memory isolation prevents access to host memory
-- Function imports limit accessible APIs
-- No direct file system or network access
+WebAssembly provides strong isolation:
 
-### 8.2 Capability-Based Security
+- Linear memory is not shared with the host.
+- The only functions the guest can call are those explicitly bound in the `host` linker.
+- No ambient filesystem or network access — guests interact with artifacts through the host's `storage`, `environment`, and `command` resources.
 
-Plugins operate under a capability-based security model:
-- Access only to explicitly granted capabilities
-- No ambient authority
-- Limited view of the host system
+### 8.2 Capability Surface
+
+Every capability a plugin needs is expressed as a resource it receives by borrowed reference from the host. There is no `wasi:filesystem`, no sockets, and no clocks enabled by default — the host only wires what `host.wit` declares.
 
 ### 8.3 Resource Limits
 
-The WebAssembly runtime enforces resource limits:
-- Memory consumption limits
-- Execution time limits
-- Call stack depth limits
+The `wasmtime::Store<host::Host>` is the natural place to attach fuel, memory caps, and epoch-based interruption; policies live on the host side and are invisible to guests.
 
-### 8.4 Interface Safety
+### 8.4 Type Safety
 
-The WIT interface provides type safety:
-- Strong typing prevents many common vulnerabilities
-- No unsafe memory access
-- Validated parameter passing
+The component model's type system (WIT) validates parameter passing at instantiation time. Resource handles cannot be forged by a guest; each handle is tracked by wasmtime's resource table.
 
-## 9. Plugin Discovery and Registration
+## 9. Plugin Usage Examples
 
-### 9.1 Plugin Declaration in Starlark
+All examples below assume the plugin has been declared as shown in §4.1. The declaration binds a name; user entries reference that name by setting `kind` (and any parameters the plugin requires).
 
-Plugins are declared in Starlark build files:
+### 9.1 Custom Storage Backend
 
-```starlark
-plugin(
-    name = "s3-storage",
-    kind = "wasm",
-    source = ["//vendor:s3-storage-1.0.0.wasm"],
-)
+```toml
+[plugin.s3-storage]
+kind   = "wasm"
+source = [{ kind = "remote", url = "https://example.com/plugins/s3-storage-1.0.0.wasm" }]
 
-storage_backend(
-    name = "my-s3-backend",
-    plugin = "s3-storage",
-    bucket = "my-build-artifacts",
-    region = "us-west-2",
-)
+[cache.build]
+kind   = "s3"
+bucket = "my-build-artifacts"
+region = "us-west-2"
+prefix = "builds/"
 ```
 
-### 9.2 Plugin Registration Flow
+(`kind = "s3"` is already satisfied by the builtin `edo-core-plugin`; the snippet above demonstrates the _shape_ of a plugin-backed cache entry — swap `"s3"` for whatever `supports` value the wasm plugin advertises.)
 
-1. The build engine parses plugin declarations
-2. The Plugin Manager resolves and loads the plugin
-3. Component implementations are registered with their respective registries
-4. Component instances are created from the registered implementations
+### 9.2 Custom Environment Farm
 
-### 9.3 Plugin Configuration
+```toml
+[plugin.docker-env]
+kind   = "wasm"
+source = [{ kind = "remote", url = "https://example.com/plugins/docker-env-1.2.0.wasm" }]
 
-Plugins can receive configuration through Starlark rules:
+[environment.ubuntu-build]
+kind     = "docker"
+image    = "ubuntu:20.04"
+packages = ["build-essential", "cmake", "python3"]
 
-```starlark
-# Plugin declaration
-plugin(
-    name = "docker-env",
-    kind = "wasm",
-    source = ["//vendor:docker-env-1.2.0.wasm"],
-)
+[environment.ubuntu-build.env]
+DEBIAN_FRONTEND = "noninteractive"
 
-# Plugin configuration and use
-environment_farm(
-    name = "docker",
-    plugin = "docker-env",
-    image = "ubuntu:20.04",
-    network = "none",
-    mounts = {
-        "/cache": "//local:cache",
-    },
-)
+[transform.my-app]
+kind        = "script"
+environment = "//example/ubuntu-build"
+source      = ["//example/src"]
+commands    = ["make"]
+```
+
+### 9.3 Custom Transform
+
+```toml
+[plugin.rust-wasm]
+kind   = "wasm"
+source = [{ kind = "remote", url = "https://example.com/plugins/rust-wasm-0.9.0.wasm" }]
+
+[transform.my-wasm-component]
+kind        = "rust-wasm"
+environment = "//example/host"
+source      = ["//example/src"]
+target      = "wasm32-unknown-unknown"
+wasi        = true
+opt_level   = "s"
+```
+
+### 9.4 Custom Vendor
+
+Compare with the builtin `[vendor.public-ecr]` shape from `examples/hello_oci/edo.toml`:
+
+```toml
+[plugin.cargo-vendor]
+kind   = "wasm"
+source = [{ kind = "remote", url = "https://example.com/plugins/cargo-vendor-0.1.0.wasm" }]
+
+[vendor.crates-io]
+kind    = "cargo"
+index   = "https://github.com/rust-lang/crates.io-index"
 ```
 
 ## 10. Implementation Considerations
 
 ### 10.1 Plugin Development Experience
 
-To facilitate plugin development:
-- Provide SDK libraries for common languages (Rust, C, C++, Go)
-- Create template projects for new plugins
-- Implement testing tools for plugin validation
-- Develop documentation and examples
+- The canonical SDK is `crates/edo-plugin-sdk` for Rust guests.
+- Any language with a WIT / component-model toolchain (e.g. `jco` for JS, `wit-bindgen` for C / C++ / TinyGo) can produce a valid `edo:plugin@1.0.0` component.
+- `Stub` defaults let authors implement only the resources they care about.
 
 ### 10.2 Plugin Distribution
 
-Plugins can be distributed through:
-- Local file system
-- Git repositories
-- Package registries
-- Custom plugin registries
+Plugins are plain `.wasm` files fetched through any of Edo's built-in source kinds (`remote`, `git`, `local`, `image`). A plugin declared with `kind = "wasm"` and a `source = [...]` list can therefore live wherever its source kind can live.
 
 ### 10.3 Plugin Versioning
 
-Plugin versioning follows semver principles:
-- Plugins specify their interface compatibility
-- Edo validates plugin interface compatibility at load time
-- Version conflicts are reported clearly to users
+Plugin versioning is driven by whatever source kind the plugin uses: git refs / tags, remote URLs with embedded versions, OCI image tags, etc. The WIT package carries its own semver (`edo:plugin@1.0.0`) and must match between host and guest.
 
 ### 10.4 Performance Considerations
 
-The WebAssembly runtime introduces some overhead:
-- Just-in-time compilation minimizes runtime overhead
-- Caching compiled modules improves subsequent load times
-- Critical operations can be optimized with native implementations
+- Wasmtime uses ahead-of-time compilation via cranelift; compiled components are cached per `WasmPlugin` for the duration of a build session.
+- Host/guest calls are synchronous from the guest's perspective; the host-side adapter layer (`impl_/`) bridges them into `async` trait methods using a mutex-guarded `Store`.
+- For hot paths (e.g. thousands of transforms) an in-process `PluginImpl` will always beat a wasm implementation.
 
-## 11. Example Use Cases
+## 11. Future Considerations
 
-### 11.1 Custom Storage Backend
+### 11.1 Plugin Registry
 
-```starlark
-# Define a plugin that implements an S3 storage backend
-plugin(
-    name = "s3-storage",
-    kind = "wasm",
-    source = ["//vendor:s3-storage-1.0.0.wasm"],
-)
+A centralised index for sharing and discovering plugins: searchable catalog, version metadata, signing, automated smoke tests.
 
-# Configure an S3 storage backend instance
-storage_backend(
-    name = "my-build-cache",
-    plugin = "s3-storage",
-    bucket = "my-build-artifacts",
-    region = "us-west-2",
-    prefix = "builds/",
-)
+### 11.2 Richer Component Composition
 
-# Use the storage backend in a build
-build_config(
-    name = "default",
-    build_cache = "my-build-cache",
-)
-```
+The component model allows linking multiple components together at load time. A future revision could compose third-party plugins with reusable helper components supplied by Edo.
 
-### 11.2 Custom Environment Farm
+### 11.3 Enhanced Security Features
 
-```starlark
-# Define a plugin that implements a Docker environment farm
-plugin(
-    name = "docker-env",
-    kind = "wasm",
-    source = ["//vendor:docker-env-1.2.0.wasm"],
-)
+- Per-plugin fuel / memory policies.
+- Signature verification on plugin artifacts.
+- Runtime auditing of host calls.
 
-# Configure a Docker environment farm
-environment_farm(
-    name = "ubuntu-build",
-    plugin = "docker-env",
-    image = "ubuntu:20.04",
-    packages = ["build-essential", "cmake", "python3"],
-    env = {
-        "DEBIAN_FRONTEND": "noninteractive",
-    },
-)
+### 11.4 Cross-Language Development
 
-# Use the environment in a transform
-cpp_build(
-    name = "my-app",
-    srcs = ["//src:*.cpp"],
-    environment = "ubuntu-build",
-)
-```
+Templates and CI recipes for producing `edo:plugin@1.0.0` components in languages beyond Rust.
 
-### 11.3 Custom Transform
+## 12. Conclusion
 
-```starlark
-# Define a plugin that implements a specialized build process
-plugin(
-    name = "rust-wasm",
-    kind = "wasm",
-    source = ["//vendor:rust-wasm-0.9.0.wasm"],
-)
-
-# Configure a Rust WebAssembly build
-rust_wasm_build(
-    name = "my-wasm-component",
-    srcs = ["//src/wasm:*.rs"],
-    target = "wasm32-unknown-unknown",
-    wasi = True,
-    opt_level = "s",
-)
-```
-
-## 12. Future Considerations
-
-### 12.1 Plugin Marketplace
-
-A centralized repository for sharing and discovering plugins:
-- Searchable catalog of plugins
-- Versioning and compatibility information
-- Ratings and reviews
-- Automated testing and validation
-
-### 12.2 Component Model Integration
-
-As the WebAssembly Component Model matures:
-- Migrate to component-model-based interfaces
-- Support composition of plugin components
-- Leverage enhanced linking capabilities
-
-### 12.3 Enhanced Security Features
-
-Additional security features may include:
-- Fine-grained capability control
-- Plugin signature verification
-- Runtime monitoring and policy enforcement
-- Security auditing for plugins
-
-### 12.4 Cross-Language Development
-
-Improved tooling for plugin development in multiple languages:
-- Better language bindings generation
-- Consistent development experience across languages
-- Testing frameworks for all supported languages
-- Performance optimization guides
-
-## 13. Conclusion
-
-The Edo Plugin System provides a flexible, secure, and performant mechanism for extending the build system's capabilities. By using WebAssembly and a well-defined interface system, it enables developers to create custom implementations of core components while maintaining the security and reliability of the overall system. The modular design allows for incremental adoption and continuous evolution of the plugin ecosystem.
+The Edo Plugin System gives a single, uniform surface (`Plugin` / `PluginImpl`) for both the in-process builtin (`edo-core-plugin`) and arbitrary wasm components speaking `edo:plugin@1.0.0`. Declarations live in `edo.toml` under `[plugin.<name>]`, resolution and scheduling are split between `Context` and `Scheduler`, and the host ↔ guest contract is fully captured by `crates/edo-wit/{edo,host,abi}.wit`. Authors targeting the wasm boundary build against `edo-plugin-sdk`; anyone wanting native performance can implement `PluginImpl` directly.

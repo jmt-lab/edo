@@ -21,7 +21,7 @@ Edo is a modern build tool implemented in Rust that addresses critical limitatio
 - **Dependency Resolution**: Sophisticated dependency management with version constraint satisfaction
 - **Parallel Execution**: Optimized parallel build execution based on dependency graph
 - **WebAssembly Plugins**: Extend any component with plugins written in any language that compiles to WebAssembly
-- **Starlark Configuration**: Familiar, deterministic configuration language with a focus on readability
+- **Declarative TOML Configuration**: Simple, deterministic project manifests (`edo.toml`) with a `schema-version` envelope for forward compatibility
 
 ## Installation
 
@@ -108,13 +108,50 @@ Edo is particularly well-suited for:
 
 ## Configuration Reference
 
-Edo uses Starlark for build configuration. Here's an example showcasing common patterns:
+Edo uses TOML for build configuration. A project is described by an `edo.toml` file at its root, dispatched by a top-level `schema-version` field (currently `"1"`).
 
-__TODO: Fill out this section__
+A minimal example (see `examples/hello_rust/edo.toml` for a full walkthrough):
+
+```toml
+schema-version = "1"
+
+[source.src]
+kind       = "local"
+path       = "hello_rust"
+out        = "."
+is_archive = false
+
+[transform.code]
+kind   = "import"
+source = ["//hello_rust/src"]
+
+[transform.build]
+kind     = "script"
+depends  = ["//hello_rust/code"]
+commands = [
+    "mkdir -p {{install-root}}/bin",
+    "cargo build --release",
+    "cp target/release/hello_rust {{install-root}}/bin/hello_rust",
+]
+```
+
+Top-level sections: `[config]`, `[cache.source.*]` / `[cache.build]` / `[cache.output]`, `[plugin.*]`, `[environment.*]`, `[source.*]`, `[transform.*]`, `[vendor.*]`, `[requires.*]`. Script transform commands are rendered with Handlebars and receive variables such as `{{install-root}}` and `{{build-root}}`.
+
+Builtin kinds shipped by the core plugin:
+
+| Component       | Kinds                                       |
+| --------------- | ------------------------------------------- |
+| Storage backend | `s3`                                        |
+| Environment     | `local`, `container`                        |
+| Source          | `git`, `local`, `image`, `remote`, `vendor` |
+| Transform       | `compose`, `import`, `script`               |
+| Vendor          | `image`                                     |
+
+Additional kinds can be supplied by loading a WebAssembly plugin via `[plugin.<name>]`.
 
 ## Plugin Development
 
-__TODO: Fill out this section__
+**TODO: Fill out this section**
 
 ## Contributing
 
@@ -131,6 +168,7 @@ Edo is currently in active development. We're working toward our first stable re
 ## Acknowledgments
 
 Edo builds upon ideas and concepts from many excellent build tools including:
+
 - Bazel
 - Buck2
 - BuildStream

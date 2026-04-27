@@ -15,16 +15,19 @@ A recurring challenge in software development is the need to produce portable bi
 ## 2. Goals
 
 ### 2.1 Flexible Architecture
+
 - Create a build tool that builds upon the proven concepts of established solutions like Buck2, Bazel, Pants, and BuildStream
 - Implement a modular design that allows components to be replaced or customized without affecting the core build logic
 - Maintain separation between build environment specification and build execution
 
 ### 2.2 Extensible Plugin System
+
 - Provide a robust plugin API that enables runtime loading of custom build logic
 - Allow users to implement and integrate their own build strategies without modifying the core system
 - Support plugin versioning and compatibility checking to ensure system stability
 
 ### 2.3 Reliable Build Reproducibility
+
 - Implement a secure hashing mechanism that uniquely identifies build artifacts based on their inputs
 - Ensure deterministic builds by tracking all inputs that could affect build outputs
 - Optimize build performance by skipping unnecessary rebuilds when inputs haven't changed
@@ -35,6 +38,7 @@ A recurring challenge in software development is the need to produce portable bi
 ### 3.1 Core Components
 
 #### 3.1.1 Storage Component
+
 - Must manage caching and persistence of all artifacts in the build system
 - Must handle source, intermediate build, and output artifacts
 - Must implement a pluggable backend system for different storage solutions
@@ -44,14 +48,16 @@ A recurring challenge in software development is the need to produce portable bi
 - Must validate all hashes in both upload and download operations
 
 #### 3.1.2 Source Component
+
 - Must define interfaces for obtaining external code and artifacts
 - Must manage retrieval of external dependencies
 - Must handle source code fetching from various locations
 - Must support remote package downloads and local source references
 - Must ensure reproducible source acquisition through content addressing
-- Must support the concept of vendors and wants definitions for external dependencies
+- Must support the concept of vendors (`[vendor.<name>]`) and requires declarations (`[requires.<name>]`) for external dependencies
 
 #### 3.1.3 Environment Component
+
 - Must define the execution context for build operations
 - Must provide a flexible interface for implementing different runtime environments
 - Must support various execution strategies:
@@ -62,6 +68,7 @@ A recurring challenge in software development is the need to produce portable bi
 - Must respect sandboxing principles, particularly network isolation for non-local environments
 
 #### 3.1.4 Transform Component
+
 - Must process one or more input artifacts into output artifacts
 - Must maintain deterministic relationship between inputs and outputs
 - Must support dependency tracking and incremental builds
@@ -78,17 +85,17 @@ A recurring challenge in software development is the need to produce portable bi
   - Environment implementations
   - Transform definitions
 - Must support runtime loading of plugins to ensure system flexibility
-- Must discover plugins through declarations in Starlark build files
-- Must fetch plugin binaries according to source instructions in the plugin declaration
+- Must discover plugins through `[plugin.<name>]` tables declared in `edo.toml`
+- Must fetch plugin binaries (WebAssembly components) according to the source instructions in each `[plugin.<name>]` table
 
 ### 3.3 Build Configuration Requirements
 
-- Must define build logic using Starlark scripting language
-- Must provide a familiar syntax for users of Buck2, Bazel, and Pants
+- Must define build configuration declaratively in TOML, using a top-level `schema-version = "1"` envelope
+- Must organise configuration into keyed sections: `[config]`, `[cache.source.*]`, `[cache.build]`, `[cache.output]`, `[plugin.<name>]`, `[environment.<name>]`, `[source.<name>]`, `[transform.<name>]`, `[vendor.<name>]`, and `[requires.<name>]`
 - Must ensure deterministic evaluation of build configurations
-- Must support custom rules and macros
-- Must maintain clear separation between build definition and execution
-- Must use `.edo` file extension for all build configuration files
+- Must support custom behaviour through plugin-provided kinds rather than an in-file scripting language
+- Must maintain clear separation between build definition (TOML) and execution (Context + Scheduler)
+- Must use the `edo.toml` filename for all project build configuration files
 
 ## 4. Functional Requirements
 
@@ -106,14 +113,14 @@ A recurring challenge in software development is the need to produce portable bi
 - Must support both local and remote caches for artifacts
 - Must implement content-addressable storage for artifacts
 - Must store artifacts as OCI-compatible artifacts with custom manifests
-- Must support artifact invalidation through user-initiated commands (prune/wipe)
+- Must support artifact invalidation through user-initiated commands (`edo prune`)
 
 ### 4.3 Dependency Resolution
 
 - Must support two-fold dependency approaches:
   - Internal dependencies between transform actions (via DAG)
-  - External dependencies through vendors and wants declarations
-- Must implement dependency resolution for external artifacts via the wants block
+  - External dependencies declared in `[requires.<name>]` tables and resolved through `[vendor.<name>]` providers
+- Must implement dependency resolution for external artifacts via the `[requires.*]` tables
 - Must generate and utilize resolution lock files (edo.lock.json) for reproducible builds
 - Must provide commands to update resolution lock files as needed
 
@@ -126,10 +133,10 @@ A recurring challenge in software development is the need to produce portable bi
 
 ### 4.5 Plugin System
 
-- Must support plugin declarations in Starlark build files
+- Must support plugin declarations via `[plugin.<name>]` tables in `edo.toml`
 - Must resolve plugin sources through the standard source resolution mechanism
-- Must load and execute WebAssembly plugins at runtime
-- Must enforce interface compliance through the WIT specification
+- Must load and execute WebAssembly component plugins at runtime via the wasmtime host
+- Must enforce interface compliance through the WIT specification (`edo:plugin@1.0.0`)
 
 ## 5. Non-Functional Requirements
 
@@ -164,15 +171,18 @@ A recurring challenge in software development is the need to produce portable bi
 
 - Must provide an intuitive CLI for all operations
 - Must support common operations:
-  - Building specific targets
-  - Updating dependency lock files
-  - Pruning or clearing caches
-  - Plugin management
+  - Building specific targets (`edo run <addr>`)
+  - Extracting a built artifact to a local directory (`edo checkout <addr> <out>`)
+  - Listing defined transforms / targets (`edo list`)
+  - Updating dependency lock files (`edo update`)
+  - Pruning cached artifacts (`edo prune`)
+
+Plugin lifecycle is declarative rather than imperative: plugins are declared in `[plugin.<name>]` tables in `edo.toml` and fetched automatically during project load, so no dedicated plugin-management subcommand is required.
 
 ### 6.2 Configuration Experience
 
-- Must use Starlark language for build files and configurations
-- Must provide clear templates and examples for common configuration patterns
+- Must use TOML for build files and configurations, with the `schema-version` field selecting the schema dispatch
+- Must provide clear templates and examples for common configuration patterns (see `examples/*/edo.toml`)
 - Must implement helpful error messages for configuration issues
 
 ## 7. Future Considerations
@@ -195,5 +205,5 @@ A recurring challenge in software development is the need to produce portable bi
 ## 8. Implementation Constraints
 
 - Must be implemented in Rust programming language
-- Must use WebAssembly for plugin extensibility
-- Must use Starlark for build configuration files
+- Must use the WebAssembly Component Model for plugin extensibility
+- Must use TOML (`edo.toml`, `schema-version = "1"`) for build configuration files

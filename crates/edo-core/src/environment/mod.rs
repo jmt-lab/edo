@@ -1,11 +1,21 @@
+//! Environment subsystem.
+//!
+//! Defines where transforms execute. An [`Environment`] provides sandboxing,
+//! filesystem operations, and command execution; a [`Farm`] creates fresh
+//! environments on demand for the scheduler. [`Command`] captures a deferred
+//! script (interpreter + handlebars-templated commands + variables) that is
+//! later dispatched to an [`Environment`] via [`Environment::run`].
+//!
+//! All fallible operations return [`EnvResult`], with failures modelled by
+//! [`EnvironmentError`] in [`error`].
+
 use super::storage::Id;
+use super::storage::Storage;
 use crate::context::Log;
 use crate::util::{Reader, Writer};
 use arc_handle::arc_handle;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-
-use super::storage::Storage;
 
 mod command;
 pub mod error;
@@ -15,6 +25,7 @@ pub use command::*;
 pub use error::EnvironmentError;
 pub use farm::*;
 
+/// Convenience result alias for fallible environment operations.
 pub type EnvResult<T> = std::result::Result<T, error::EnvironmentError>;
 
 /// An Environment represents where a transform is executed and generally outside of local environments provide some level of sandboxing
@@ -24,7 +35,7 @@ pub type EnvResult<T> = std::result::Result<T, error::EnvironmentError>;
 pub trait Environment {
     /// Expand the provided path to a canonicalized absolute path inside of an environment
     async fn expand(&self, path: &Path) -> EnvResult<PathBuf>;
-    /// Create a directory inside of the environmet
+    /// Create a directory inside of the environment
     async fn create_dir(&self, path: &Path) -> EnvResult<()>;
     /// Set an environment variable
     async fn set_env(&self, key: &str, value: &str) -> EnvResult<()>;

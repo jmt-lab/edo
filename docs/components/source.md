@@ -1,77 +1,126 @@
-# Edo Source Component - Detailed Design
+# Edo Source Component — Detailed Design
 
 ## 1. Overview
 
-The Source component is one of Edo's four core architectural pillars, responsible for managing the acquisition of external code and artifacts for the build system. This component ensures reproducible builds by providing a consistent, verifiable way to fetch dependencies from various origins and integrating with the Storage component for artifact persistence.
+The Source component is one of Edo's four pluggable pillars (alongside
+**Storage**, **Environment**, and **Transform**). It is responsible for
+obtaining external code and binary artifacts and publishing them into the
+shared `Storage` so that `Transform`s can consume deterministic inputs.
+
+Declarations live in `edo.toml` (schema v1):
+
+- `[source.<n>]` tables register concrete `Source` handles keyed as
+  `//<project>/<n>`.
+- `[vendor.<n>]` tables register `Vendor` handles used to **resolve** names
+  and version requirements into concrete source nodes.
+- `[requires.<n>]` tables declare vendored dependencies (a `(name,
+version-req)` pair that the resolver must satisfy).
+
+The umbrella project (`examples/edo.toml`) only carries `schema-version =
+"1"`; individual examples under `examples/hello_rust` and
+`examples/hello_oci` show the real shapes.
 
 ## 2. Core Responsibilities
 
-The Source component is responsible for:
-
-1. **Source Acquisition**: Fetching external code and artifacts from various locations
-2. **Dependency Resolution**: Resolving version constraints for external dependencies
-3. **Vendor Management**: Handling different external sources through a pluggable system
-4. **Source Caching**: Working with the Storage component to cache source artifacts
-5. **Build Reproducibility**: Ensuring consistent, reproducible source acquisition
-6. **Environment Integration**: Staging sources into build environments
+1. **Source Acquisition** — fetching external code/artifacts from Git, HTTP,
+   OCI registries, the local tree, or a resolved vendor.
+2. **Dependency Resolution** — turning `[requires.*]` entries into concrete
+   versions across every registered `Vendor`, producing `edo.lock.json`.
+3. **Vendor Management** — pluggable lookup of available versions, transitive
+   dependencies, and concrete source `Node`s for a `(name, version)` pair.
+4. **Cache Coordination** — using the configured source cache(s) in
+   `Storage` to avoid redundant network fetches.
+5. **Build Reproducibility** — locking and replaying resolution results.
+6. **Environment Integration** — staging source artifacts into a build
+   `Environment` at a specific path.
 
 ## 3. Component Architecture
 
 ### 3.1 Key Abstractions
 
-#### 3.1.1 Source
+All core traits use the `#[arc_handle]` macro: you implement `SourceImpl` /
+`VendorImpl`, wrap it with `Source::new(impl)` / `Vendor::new(impl)`, and the
+resulting handle is cheap to `Clone` and `Send + Sync`.
 
-The `Source` trait represents the core abstraction for obtaining external artifacts:
+#### 3.1.1 `Source`
+
+Defined in `crates/edo-core/src/source/mod.rs`:
 
 ```rust
-trait Source {
-    /// The unique id for this source
+#[arc_handle]
+#[async_trait]
+pub trait Source {
     async fn get_unique_id(&self) -> SourceResult<Id>;
-
-    /// Fetch the given source to storage
     async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact>;
+    async fn stage(
+        &self,
+        log: &Log,
+        storage: &Storage,
+        env: &Environment,
+        path: &Path,
+    ) -> SourceResult<()>;
+}
 
-    /// Stage the source into the given environment and path
-    async fn stage(&self, log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()>;
-
-    /// Check the cache if this source already exists, and only if it does not
-    /// call fetch to get the artifact. Use this in most cases instead of calling
-    /// fetch() as fetch will ALWAYS repull the source.
-    async fn cache(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact>;
+// Inherent on the arc_handle-generated `Source` handle (NOT a trait method):
+impl Source {
+    /// Cache-aware fetch. Prefer this over calling `fetch` directly —
+    /// `fetch` ALWAYS re-pulls, while `cache` first consults
+    /// `storage.fetch_source(&id)` (which in turn pulls from any configured
+    /// remote source cache into the local cache).
+    pub async fn cache(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
+        let id = self.get_unique_id().await?;
+        if let Some(artifact) = storage.fetch_source(&id).await? {
+            return Ok(artifact);
+        }
+        self.fetch(log, storage).await
+    }
 }
 ```
 
-Key capabilities of `Source`:
-- **Unique Identity**: Each source can generate a unique identifier
-- **Fetch Operation**: Retrieve the source and store it in the Storage component
-- **Caching**: Smart retrieval that prioritizes cached artifacts
-- **Environment Integration**: Stage source artifacts into build environments
+Notes:
 
-#### 3.1.2 Vendor
+- `Source::cache` is the **recommended call path** for every caller outside
+  of the engine internals. The `Scheduler` pre-fetches all sources via
+  `Graph::fetch(ctx)` prior to running transforms and uses `cache` under
+  the hood.
+- `stage` decides how the artifact lands in the environment (raw copy vs
+  archive extraction); implementations typically call `self.cache(...)`
+  internally.
 
-The `Vendor` trait represents external providers of source artifacts with dependency resolution support:
+#### 3.1.2 `Vendor`
+
+Defined in `crates/edo-core/src/source/vendor.rs`:
 
 ```rust
-trait Vendor {
-    /// Get all versions of a given package/source name
-    async fn get_options(&self, name: &str) -> VendorResult<HashSet<Version>>;
+#[arc_handle]
+#[async_trait]
+pub trait Vendor {
+    /// All known versions of `name` exposed by this vendor.
+    async fn get_options(&self, name: &str) -> SourceResult<HashSet<Version>>;
 
-    /// Resolve a given name and version into a valid source node
-    async fn resolve(&self, name: &str, version: &Version) -> VendorResult<Node>;
+    /// Materialise a concrete source-kind `Node` for `(name, version)`.
+    /// The returned `Node` is fed back through `CorePlugin::create_source`
+    /// (or a wasm plugin) to produce an actual `Source` handle.
+    async fn resolve(&self, name: &str, version: &Version) -> SourceResult<Node>;
 
-    /// Get all dependency requirements for a given name and version
-    async fn get_dependencies(&self, name: &str, version: &Version) -> VendorResult<Option<HashMap<String, VersionReq>>>;
+    /// Transitive dependency requirements for `(name, version)`.
+    /// Returning `None` means "unknown — treat as leaf"; returning
+    /// `Some(empty)` means "known to have no deps".
+    async fn get_dependencies(
+        &self,
+        name: &str,
+        version: &Version,
+    ) -> SourceResult<Option<HashMap<String, VersionReq>>>;
 }
 ```
 
-Key capabilities of `Vendor`:
-- **Version Discovery**: Find available versions of a package
-- **Package Resolution**: Convert a package name and version to a concrete source
-- **Dependency Information**: Retrieve dependency requirements for packages
+Vendor errors are unified into `SourceError` (`SourceResult<T>` everywhere);
+there is no separate `VendorError` type in the current tree.
 
-#### 3.1.3 Resolver
+#### 3.1.3 `Resolver`
 
-The `Resolver` is responsible for resolving complex dependency graphs:
+Implemented in `crates/edo-core/src/source/resolver.rs` on top of the
+[`resolvo`](https://crates.io/crates/resolvo) PubGrub-style solver:
 
 ```rust
 #[derive(Clone, Default)]
@@ -82,22 +131,33 @@ pub struct Resolver {
 }
 ```
 
-Key characteristics:
-- **Multi-vendor**: Supports multiple vendors with different package ecosystems
-- **Version Resolution**: Handles version constraint satisfaction
-- **Conflict Resolution**: Resolves dependency conflicts
-- **Generated Lock File**: Produces deterministic dependency lock files
+The flow is:
 
-#### 3.1.4 Dependency
+1. For every declared `[requires.<n>]`, collect a `Dependency { addr, name,
+version: VersionReq, vendor: Option<String> }`.
+2. `resolver.build_db(&name)` asks every registered vendor for
+   `get_options(name)`, interns the resulting `EdoVersion`s, and builds (or
+   unions) a `VersionSet` for that name.
+3. `resolver.resolve(requires)` wraps each `Dependency` in a
+   `ConditionalRequirement`, runs `resolvo::Solver`, then maps each chosen
+   solvable back to `(vendor, name, version)` keyed by `Addr`.
+4. For each resolution, `vendor.resolve(name, version)` is called to obtain
+   a `Node`, which is registered as a `[source.<n>]` of kind `vendor` and
+   written into `edo.lock.json`.
 
-The `Dependency` structure represents a version-constrained dependency on an external package:
+`EdoVersion`/`EdoVersionSet` live in `crates/edo-core/src/source/version.rs`.
+
+#### 3.1.4 `Dependency` / `Require`
+
+`crates/edo-core/src/source/require.rs` holds the in-memory requirement
+descriptor used by the resolver:
 
 ```rust
 struct Dependency {
-    addr: Addr,              // Location in the build graph
-    name: String,            // Package name
-    version: VersionReq,     // Version requirement
-    vendor: Option<String>,  // Optional vendor specification
+    addr: Addr,              // where the resolved source will be registered
+    name: String,            // logical package name
+    version: VersionReq,     // semver requirement
+    vendor: Option<String>,  // optional pin to a specific registered vendor
 }
 ```
 
@@ -105,824 +165,327 @@ struct Dependency {
 
 ```mermaid
 classDiagram
-    class SourceManager {
-        +register_vendor(name: &str, vendor: Vendor) -> Result<()>
-        +register_source(address: &Addr, source: Source) -> Result<()>
-        +resolve_dependencies(requires: Vec<Dependency>) -> Result<HashMap<Addr, (String, String, Version)>>
-        +fetch_source(address: &Addr) -> SourceResult<Artifact>
-        +stage_source(address: &Addr, env: &Environment, path: &Path) -> SourceResult<()>
+    class Context {
+        +load_project(locked: bool)
+        +run(addr: Addr)
+        +checkout(addr: Addr, out: Path)
+    }
+    class Scheduler {
+        +run(ctx: Context, addr: Addr)
+    }
+    class Graph {
+        +add(ctx, addr)
+        +fetch(ctx)
+        +run(path, ctx, addr)
+    }
+    class Storage {
+        +fetch_source(id: Id) -> Option~Artifact~
+        +has(id: Id) -> bool
+        +save(artifact: Artifact)
     }
 
     class Source {
-        <<interface>>
-        +get_unique_id() -> SourceResult<Id>
-        +fetch(log: &Log, storage: &Storage) -> SourceResult<Artifact>
-        +stage(log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()>
-        +cache(log: &Log, storage: &Storage) -> SourceResult<Artifact>
+        <<arc_handle trait + inherent cache()>>
+        +get_unique_id() Id
+        +fetch(log, storage) Artifact
+        +stage(log, storage, env, path)
+        +cache(log, storage) Artifact
     }
-
     class Vendor {
-        <<interface>>
-        +get_options(name: &str) -> VendorResult<HashSet<Version>>
-        +resolve(name: &str, version: &Version) -> VendorResult<Node>
-        +get_dependencies(name: &str, version: &Version) -> VendorResult<Option<HashMap<String, VersionReq>>>
+        <<arc_handle trait>>
+        +get_options(name) HashSet~Version~
+        +resolve(name, version) Node
+        +get_dependencies(name, version) Option~HashMap~String, VersionReq~~
     }
-
     class Resolver {
-        -pool: Arc<Pool<EdoVersionSet>>
-        -name_to_vs: DashMap<NameId, Set>
-        -vendors: DashMap<String, Vendor>
-        +resolve(requires: Vec<Dependency>) -> Result<HashMap<Addr, (String, String, Version)>>
-        +add_vendor(name: &str, vendor: Vendor)
-        +build_db(name: &str) -> Result<()>
-        -build_requirement(node: &Dependency) -> Result<Requirement>
+        -pool
+        -name_to_vs
+        -vendors
+        +add_vendor(name, vendor)
+        +build_db(name)
+        +resolve(requires) HashMap~Addr, (String, String, Version)~
     }
-
-    class Storage {
-        +fetch_source(id: &Id) -> StorageResult<Option<Artifact>>
-        +safe_open(id: &Id) -> StorageResult<Artifact>
-        +safe_save(artifact: &Artifact) -> StorageResult<()>
-    }
-
-    class Environment {
-        +ensure_dir(path: &Path) -> EnvResult<()>
-        +write_file(path: &Path, content: &[u8]) -> EnvResult<()>
-        +extract_archive(archive: &Path, dest: &Path) -> EnvResult<()>
-    }
-
-    class Dependency {
-        +addr: Addr
-        +name: String
-        +version: VersionReq
-        +vendor: Option<String>
-    }
-
-    class SourceRegistry {
-        -sources: HashMap<Addr, Source>
-        +register(addr: &Addr, source: Source) -> Result<()>
-        +get(addr: &Addr) -> Option<Source>
-    }
-
-    class VendorRegistry {
-        -vendors: HashMap<String, Vendor>
-        +register(name: &str, vendor: Vendor) -> Result<()>
-        +get(name: &str) -> Option<Vendor>
-    }
-
-    class DependencyLock {
+    class Lock {
         +version: String
-        +entries: HashMap<Addr, ResolvedDependency>
-        +save(path: &Path) -> Result<()>
-        +load(path: &Path) -> Result<Self>
-    }
-
-    class ResolvedDependency {
-        +vendor: String
-        +name: String
-        +version: Version
+        +resolved: HashMap~Addr, Node~
         +digest: String
+        +load(path)
+        +save(path)
     }
 
-    class SourceProvider {
-        <<interface>>
-        +create_source(args: SourceArgs) -> Result<Source>
-    }
-
-    class VendorProvider {
-        <<interface>>
-        +create_vendor(args: VendorArgs) -> Result<Vendor>
-    }
-
-    SourceManager o-- SourceRegistry : contains
-    SourceManager o-- VendorRegistry : contains
-    SourceManager o-- Resolver : contains
-    SourceManager -- Storage : uses
-    SourceManager -- DependencyLock : manages
-
-    SourceRegistry o-- "*" Source : contains
-    VendorRegistry o-- "*" Vendor : contains
-
-    Resolver o-- "*" Vendor : references
-    Resolver -- Dependency : resolves
-
-    Source -- Storage : uses
-    Source -- Environment : uses
-
-    Vendor -- VersionReq : uses
-    Vendor -- Version : uses
-
-    DependencyLock o-- "*" ResolvedDependency : contains
-
-    SourceProvider -- Source : creates
-    VendorProvider -- Vendor : creates
+    Context --> Scheduler
+    Scheduler --> Graph
+    Graph --> Source : fetch/stage
+    Context --> Resolver : update
+    Resolver --> Vendor : query
+    Context --> Lock : read/write edo.lock.json
+    Source --> Storage : cache
 ```
+
+`Context` + `Scheduler` replace what older drafts of this document called
+the "Build Engine": there is no monolithic engine type. `Context` owns
+registration and project loading; `Scheduler` owns DAG execution.
 
 ## 4. Key Interfaces
 
-### 4.1 Source Interface
+### 4.1 TOML Declaration Shapes
 
-```rust
-/// This trait represents the interface all source implementations should follow
-pub trait Source: Send + Sync + 'static {
-    /// The unique id for this source
-    fn get_unique_id(&self) -> SourceResult<Id>;
-
-    /// Fetch the given source to storage
-    fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact>;
-
-    /// Stage the source into the given environment and path
-    fn stage(&self, log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()>;
-}
-
-impl Source {
-    /// Check the cache if this source already exists, and only if it does not
-    /// call fetch to get the artifact. Use this in most cases instead of calling
-    /// fetch() as fetch will ALWAYS repull the source.
-    pub async fn cache(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
-        // Check if our caches already have this artifact
-        let id = self.get_unique_id().await?;
-
-        // See if our storage can find this source artifact
-        if let Some(artifact) = storage.fetch_source(&id).await? {
-            return Ok(artifact.clone());
-        }
-
-        // Otherwise perform the fetch
-        self.fetch(log, storage).await
-    }
-}
+```toml
+# examples/hello_rust/edo.toml — a local source
+[source.src]
+kind       = "local"
+path       = "hello_rust"
+out        = "."
+is_archive = false
 ```
 
-### 4.2 Vendor Interface
+```toml
+# examples/hello_oci/edo.toml — OCI vendor + vendored requirement
+[vendor.public-ecr]
+kind = "image"
+uri  = "public.ecr.aws/docker/library"
 
-```rust
-/// Defines the interface that all source vendors must implement
-pub trait Vendor: Send + Sync + 'static {
-    /// Get all versions of a given package/source name
-    fn get_options(&self, name: &str) -> VendorResult<HashSet<Version>>;
-
-    /// Resolve a given name and version into a valid source node
-    fn resolve(&self, name: &str, version: &Version) -> VendorResult<Node>;
-
-    /// Get all dependency requirements for a given name and version
-    fn get_dependencies(&self, name: &str, version: &Version) -> VendorResult<Option<HashMap<String, VersionReq>>>;
-}
+[requires.gcc]
+kind = "image"
+at   = "=14.3.0"
 ```
 
-### 4.3 Resolver Interface
+Other observed source kinds (all in `crates/plugins/edo-core-plugin/src/source/`):
 
-```rust
-impl Resolver {
-    /// Resolve a set of dependencies into concrete versions
-    pub fn resolve(
-        &self,
-        requires: Vec<Dependency>,
-    ) -> Result<HashMap<Addr, (String, String, Version)>> {
-        let handle = Handle::current();
-        let mut targets: HashMap<(String, Option<String>), HashSet<Addr>> = HashMap::new();
-        let mut solver = Solver::new(self.clone()).with_runtime(handle);
-        let mut requirements = Vec::new();
+| Kind     | Required keys (see `validate_keys`)   | Notes                                          |
+| -------- | ------------------------------------- | ---------------------------------------------- |
+| `local`  | `path`, `out`, `is_archive`           | Tars / copies a path inside the project tree.  |
+| `git`    | `url`, `ref`, `out`                   | Clone + checkout of a ref.                     |
+| `remote` | `url`, `ref` (expected digest), `out` | HTTP(S) download with integrity check.         |
+| `image`  | `url`, `ref`                          | OCI image layer as a source artifact.          |
+| `vendor` | `path`, `inside`, `out`               | Cargo-vendor / Go-mod-vendor style extraction. |
 
-        // Process each dependency
-        for entry in requires.iter() {
-            targets
-                .entry((entry.name.clone(), entry.vendor.clone()))
-                .or_default()
-                .insert(entry.addr.clone());
-            let requirement = self.build_requirement(entry)?;
-            requirements.push(requirement);
-        }
+Vendor kinds:
 
-        // Solve the dependency constraints
-        let problem = Problem::new().requirements(requirements);
-        let resolution = match solver.solve(problem) {
-            Ok(result) => Ok(result),
-            Err(UnsolvableOrCancelled::Unsolvable(conflict)) => error::ResolutionSnafu {
-                reason: conflict.display_user_friendly(&solver).to_string(),
-            }
-            .fail(),
-            Err(UnsolvableOrCancelled::Cancelled(_)) => error::ResolutionSnafu {
-                reason: "resolution was cancelled",
-            }
-            .fail(),
-        }?;
+| Kind    | Keys  | Implementation                                                                                                                                                                                                                         |
+| ------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image` | `uri` | `ImageVendor` in `crates/plugins/edo-core-plugin/src/vendor/oci.rs`. OCI registry lookup using `ocilot`. AWS ECR (private and public, via `aws-sdk-ecr` / `aws-sdk-ecrpublic`) is supported in addition to any OCI-compliant registry. |
 
-        // Build resolution map
-        let mut found = HashMap::new();
-        for s_id in resolution.iter() {
-            let solvable = self.pool.resolve_solvable(*s_id);
-            let name = self.pool.resolve_package_name(solvable.name);
-            let vendor = self.vendors.get(&solvable.record.vendor()).unwrap();
+### 4.2 Rust Interfaces
 
-            // Match with vendor
-            if let Some(addr) = targets.get(&(name.clone(), Some(vendor.key().clone()))) {
-                for entry in addr {
-                    found.insert(
-                        entry.clone(),
-                        (
-                            vendor.key().clone(),
-                            name.clone(),
-                            solvable.record.version(),
-                        ),
-                    );
-                }
-            }
+The canonical Rust signatures are listed in §3.1 above. A few points worth
+repeating because they are easy to miss:
 
-            // Match without vendor
-            if let Some(addr) = targets.get(&(name.clone(), None)) {
-                for entry in addr {
-                    found.insert(
-                        entry.clone(),
-                        (
-                            vendor.key().clone(),
-                            name.clone(),
-                            solvable.record.version(),
-                        ),
-                    );
-                }
-            }
-        }
+- `Source` is _not_ an object-safe `dyn Trait`; you interact with the
+  `arc_handle`-generated `Source` handle. Implementers write `impl SourceImpl
+for MySource` and call `Source::new(MySource { ... })`.
+- `Source::cache` is an **inherent** method on the handle, not part of the
+  trait. Guest (wasm) source implementations do not override it — they only
+  supply `get_unique_id` / `fetch` / `stage`, and the host wraps them so
+  that `cache` is still available to callers.
+- `Vendor` methods return `SourceResult`, not a separate `VendorResult`.
 
-        Ok(found)
-    }
+### 4.3 WebAssembly Plugin Interface (WIT)
 
-    /// Build the version database for a package across all vendors
-    pub async fn build_db(&self, name: &str) -> Result<()> {
-        for entry in self.vendors.iter() {
-            let vendor_name = entry.key();
-            let vendor = entry.value();
-
-            // Get all versions from this vendor
-            let version_set = vendor.get_options(name).await?;
-            let name_id = self.pool.intern_package_name(name.to_string());
-
-            let mut edo_versions = Vec::new();
-            for version in version_set {
-                let edo_version = EdoVersion::new(vendor_name, &version);
-                self.pool.intern_solvable(name_id, edo_version.clone());
-                edo_versions.push(edo_version.clone());
-            }
-
-            // Create version set
-            let vsid = self
-                .pool
-                .intern_version_set(name_id, EdoVersionSet::new(edo_versions.as_slice()));
-
-            // Update version mapping
-            if let Some(entry) = self.name_to_vs.get(&name_id) {
-                let union_id = match entry.value() {
-                    Set::Union(union_id) => {
-                        let vs_union = self.pool.resolve_version_set_union(*union_id);
-                        self.pool.intern_version_set_union(vsid, vs_union)
-                    }
-                    Set::Single(vs_id) => self
-                        .pool
-                        .intern_version_set_union(vsid, [*vs_id].iter().cloned()),
-                };
-                self.name_to_vs.insert(name_id, Set::Union(union_id));
-            } else {
-                self.name_to_vs.insert(name_id, Set::Single(vsid));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Add a vendor to the resolver
-    pub fn add_vendor(&mut self, name: &str, vendor: Vendor) {
-        self.vendors.insert(name.to_string(), vendor);
-    }
-
-    /// Create a requirement from a dependency
-    pub fn build_requirement(&self, node: &Dependency) -> Result<Requirement> {
-        let dep_id = if let Some(name_id) = self.pool.lookup_package_name(&node.name) {
-            name_id
-        } else {
-            return error::RequirementSnafu {
-                name: node.name.clone(),
-                version: node.version.clone(),
-            }
-            .fail();
-        };
-
-        // Find matching versions
-        let mut matches = Vec::new();
-        let require = node.version.clone();
-        if let Some(entry) = self.name_to_vs.get(&dep_id) {
-            match entry.value() {
-                Set::Union(union_id) => {
-                    // Check all version sets in the union
-                    let union = self.pool.resolve_version_set_union(*union_id);
-                    for vs_id in union {
-                        let version_set = self.pool.resolve_version_set(vs_id);
-                        for version in version_set.get() {
-                            let mut flag = version.matches(&require);
-                            if let Some(vendor) = node.vendor.as_ref() {
-                                flag &= *vendor == version.vendor();
-                            }
-                            if flag {
-                                matches.push(version.clone());
-                            }
-                        }
-                    }
-                }
-                Set::Single(vs_id) => {
-                    // Check a single version set
-                    let version_set = self.pool.resolve_version_set(*vs_id);
-                    for version in version_set.get() {
-                        let mut flag = version.matches(&require);
-                        if let Some(vendor) = node.vendor.as_ref() {
-                            flag &= *vendor == version.vendor();
-                        }
-                        if flag {
-                            matches.push(version.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Create requirement from matches
-        if !matches.is_empty() {
-            let vs_id = self
-                .pool
-                .intern_version_set(dep_id, EdoVersionSet::new(matches.as_slice()));
-            Ok(Requirement::Single(vs_id))
-        } else {
-            error::RequirementSnafu {
-                name: node.name.clone(),
-                version: node.version.clone(),
-            }
-            .fail()
-        }
-    }
-}
-```
-
-### 4.4 WebAssembly Plugin Interface (WIT)
+The plugin contract lives in `crates/edo-wit/` (not a Cargo crate — a raw
+WIT package `edo:plugin@1.0.0`). The source- and vendor-related portions of
+`abi.wit` expose resources rather than flat functions:
 
 ```wit
-// source-provider.wit
-package edo:source;
-
-interface source-provider {
-    // Error type for source operations
-    enum source-error {
-        not-found,
-        fetch-error,
-        validation-error,
-        extraction-error,
-        io-error,
-    }
-
-    // Type alias for source results
-    type source-result<T> = result<T, source-error>;
-
-    // Artifact identifier (simplified)
-    record id {
-        name: string,
-        digest: list<u8>,
-    }
-
-    // Source location specification
-    variant location {
-        http(string),
-        git(string),
-        file(string),
-        custom(string),
-    }
-
-    // Source options
-    record source-options {
-        location: location,
-        reference: string,
-        integrity: option<string>,
-        strip-components: option<u32>,
-        extra-args: list<string>,
-    }
-
-    // Create a source provider
-    create-source: func(options: source-options) -> source-result<id>;
-
-    // Fetch a source to the storage
-    fetch-source: func(id: id) -> source-result<_>;
-
-    // Stage a source into an environment
-    stage-source: func(id: id, path: string) -> source-result<_>;
+// abi.wit (abridged — see crates/edo-wit/abi.wit for the authoritative text)
+resource source {
+    get-unique-id: func() -> result<id, error>;
+    fetch:         func(log: borrow<log>, storage: borrow<storage>)
+                   -> result<artifact, error>;
+    stage:         func(log: borrow<log>, storage: borrow<storage>,
+                        env: borrow<environment>, path: string)
+                   -> result<_, error>;
 }
 
-// vendor-provider.wit
-package edo:vendor;
-
-interface vendor-provider {
-    // Error type for vendor operations
-    enum vendor-error {
-        not-found,
-        resolve-error,
-        version-error,
-        network-error,
-        io-error,
-    }
-
-    // Type alias for vendor results
-    type vendor-result<T> = result<T, vendor-error>;
-
-    // Version representation
-    record version {
-        major: u32,
-        minor: u32,
-        patch: u32,
-        pre: option<string>,
-        build: option<string>,
-    }
-
-    // Version requirement representation
-    record version-req {
-        requirements: list<string>,
-    }
-
-    // Package details
-    record package {
-        name: string,
-        version: version,
-    }
-
-    // Dependency specification
-    record dependency {
-        name: string,
-        requirement: version-req,
-    }
-
-    // Vendor options
-    record vendor-options {
-        registry-url: string,
-        auth-token: option<string>,
-        cache-dir: option<string>,
-        extra-args: list<string>,
-    }
-
-    // Initialize the vendor
-    init: func(options: vendor-options) -> vendor-result<_>;
-
-    // Get available versions
-    get-versions: func(name: string) -> vendor-result<list<version>>;
-
-    // Resolve a name and version to a package
-    resolve: func(name: string, version: version) -> vendor-result<package>;
-
-    // Get dependencies for a package
-    get-dependencies: func(name: string, version: version) -> vendor-result<list<dependency>>;
+resource vendor {
+    get-options:      func(name: string)
+                      -> result<list<string>, error>;      // versions as strings
+    resolve:          func(name: string, version: string)
+                      -> result<node, error>;
+    get-dependencies: func(name: string, version: string)
+                      -> result<option<list<tuple<string, string>>>, error>;
 }
+
+create-source: func(addr: string, node: borrow<node>) -> result<source, error>;
+create-vendor: func(addr: string, node: borrow<node>) -> result<vendor, error>;
+supports:      func(component: component, kind: string) -> bool;
 ```
+
+`component` is an enum with `storage-backend | environment | source |
+transform | vendor`. Host-side adapters in
+`crates/edo-core/src/plugin/impl_/source.rs` and `vendor.rs` wrap these
+resources back into the native `Source` / `Vendor` handles.
 
 ## 5. Implementation Details
 
-### 5.1 Source Manager
+### 5.1 Registration (no `SourceManager` type)
 
-The Source Manager is responsible for managing sources and vendors:
+There is no dedicated `SourceManager` struct in the current tree. Sources
+and vendors are held directly by `Context` (`crates/edo-core/src/context/`)
+and `Project` (`context/builder.rs`):
 
-```rust
-pub struct SourceManager {
-    sources: SourceRegistry,
-    vendors: VendorRegistry,
-    resolver: Resolver,
-    storage: Storage,
-}
+- `Project::load` iterates the `[source.*]` / `[vendor.*]` tables from
+  `Schema::V1`, asks each registered `Plugin::supports(Component::Source,
+kind)` for a match, and calls `Plugin::create_source` / `create_vendor`.
+- Resolved requirements are looked up in `edo.lock.json` when
+  `locked = true`; otherwise `edo update` repopulates the lock file by
+  running the resolver.
+- The `Scheduler` retrieves `Source` handles by address from the `Context`
+  when populating the graph.
 
-impl SourceManager {
-    pub fn new(storage: Storage) -> Self {
-        Self {
-            sources: SourceRegistry::new(),
-            vendors: VendorRegistry::new(),
-            resolver: Resolver::default(),
-            storage,
-        }
-    }
+### 5.2 Built-in `Source` Implementations
 
-    pub fn register_vendor(&mut self, name: &str, vendor: Vendor) -> Result<()> {
-        self.vendors.register(name, vendor.clone());
-        self.resolver.add_vendor(name, vendor);
-        Ok(())
-    }
+All live in `crates/plugins/edo-core-plugin/src/source/` and are dispatched
+by `CorePlugin::create_source` in `crates/plugins/edo-core-plugin/src/lib.rs`.
 
-    pub fn register_source(&mut self, address: &Addr, source: Source) -> Result<()> {
-        self.sources.register(address, source)
-    }
+- **`LocalSource`** (`local.rs`): tars a project-relative path (unless
+  `is_archive = true`, in which case it passes through).
+- **`GitSource`** (`git.rs`): shells out to `git` to clone and checkout
+  `ref`, then tars the working tree.
+- **`RemoteSource`** (`remote.rs`): streams an HTTP(S) URL into an
+  artifact, verifying against the supplied digest (`ref`).
+- **`ImageSource`** (`oci.rs`): fetches an OCI manifest/index via `ocilot`
+  and records each layer as a `Layer` on the resulting `Artifact`.
+- **`VendorSource`** (`vendor.rs`): executes language-specific vendoring
+  (Rust `cargo vendor`, Go `go mod vendor`) inside a workspace subtree and
+  packages the result. It is produced by a `Vendor::resolve` call, not
+  declared directly in `edo.toml`.
 
-    pub async fn resolve_dependencies(&self, requires: Vec<Dependency>) -> Result<HashMap<Addr, (String, String, Version)>> {
-        // Build database for each required package
-        for dep in &requires {
-            self.resolver.build_db(&dep.name).await?;
-        }
+### 5.3 Built-in `Vendor` Implementation
 
-        // Resolve dependencies
-        self.resolver.resolve(requires)
-    }
+`ImageVendor` (`crates/plugins/edo-core-plugin/src/vendor/oci.rs`) is the
+only built-in vendor. It uses `ocilot` plus (optionally) the AWS ECR SDKs
+to:
 
-    pub async fn fetch_source(&self, address: &Addr) -> SourceResult<Artifact> {
-        let source = self.sources.get(address)
-            .ok_or_else(|| error::SourceNotFoundSnafu { addr: address.clone() }.build())?;
+- **`get_options(name)`**: list repository tags and parse those that look
+  like semver (`v1.2.3` or `1.2.3`).
+- **`resolve(name, version)`**: fetch the index, compute a merkle digest
+  over the manifest digests, and emit a `Node` of kind `image` with
+  `url` = resolved registry URI and `ref` = digest. That `Node` is then
+  turned into an `ImageSource` by `CorePlugin::create_source`.
+- **`get_dependencies(name, version)`**: if the image is itself an Edo
+  artifact, read its `ArtifactConfig.requires["depends"]` and surface those
+  as transitive `VersionReq`s.
 
-        source.cache(&self.log, &self.storage).await
-    }
-
-    pub async fn stage_source(&self, address: &Addr, env: &Environment, path: &Path) -> SourceResult<()> {
-        let source = self.sources.get(address)
-            .ok_or_else(|| error::SourceNotFoundSnafu { addr: address.clone() }.build())?;
-
-        source.stage(&self.log, &self.storage, env, path).await
-    }
-}
-```
-
-### 5.2 Source Implementation Types
-
-#### 5.2.1 Git Source
-
-```rust
-pub struct GitSource {
-    url: String,
-    reference: String,
-    subpath: Option<String>,
-}
-
-impl Source for GitSource {
-    async fn get_unique_id(&self) -> SourceResult<Id> {
-        // Generate a deterministic ID based on Git URL and reference
-        let digest = blake3::hash(format!("git:{}:{}", self.url, self.reference).as_bytes());
-
-        Ok(IdBuilder::default()
-            .name(format!("git_{}", self.url.replace("/", "_")))
-            .digest(digest.to_hex().to_string())
-            .build()?)
-    }
-
-    async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
-        // Clone repository to temporary location
-        // Extract content to archive
-        // Store in storage
-        // ...
-    }
-
-    async fn stage(&self, log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()> {
-        // Get artifact from storage
-        let artifact = self.cache(log, storage).await?;
-
-        // Extract to environment path
-        // ...
-    }
-}
-```
-
-#### 5.2.2 HTTP Source
-
-```rust
-pub struct HttpSource {
-    url: String,
-    integrity: Option<String>,
-    extract: bool,
-}
-
-impl Source for HttpSource {
-    async fn get_unique_id(&self) -> SourceResult<Id> {
-        // Generate a deterministic ID based on URL
-        let digest = if let Some(integrity) = &self.integrity {
-            // Use provided integrity hash
-            integrity.clone()
-        } else {
-            // Generate hash from URL
-            blake3::hash(self.url.as_bytes()).to_hex().to_string()
-        };
-
-        Ok(IdBuilder::default()
-            .name(format!("http_{}", hash_url(&self.url)))
-            .digest(digest)
-            .build()?)
-    }
-
-    async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
-        // Download file from URL
-        // Verify integrity if specified
-        // Store in storage
-        // ...
-    }
-
-    async fn stage(&self, log: &Log, storage: &Storage, env: &Environment, path: &Path) -> SourceResult<()> {
-        // Get artifact from storage
-        let artifact = self.cache(log, storage).await?;
-
-        // Extract or copy to environment path based on extract flag
-        // ...
-    }
-}
-```
-
-### 5.3 Vendor Implementation Types
-
-#### 5.3.1 NPM Vendor
-
-```rust
-pub struct NpmVendor {
-    registry_url: String,
-    auth_token: Option<String>,
-    cache_dir: PathBuf,
-}
-
-impl Vendor for NpmVendor {
-    async fn get_options(&self, name: &str) -> VendorResult<HashSet<Version>> {
-        // Query NPM registry for available versions
-        // ...
-    }
-
-    async fn resolve(&self, name: &str, version: &Version) -> VendorResult<Node> {
-        // Resolve NPM package to tarball URL
-        // Create HTTP source for the tarball
-        // ...
-    }
-
-    async fn get_dependencies(&self, name: &str, version: &Version) -> VendorResult<Option<HashMap<String, VersionReq>>> {
-        // Get dependencies from package.json
-        // ...
-    }
-}
-```
-
-#### 5.3.2 RPM Vendor
-
-```rust
-pub struct RpmVendor {
-    repo_urls: Vec<String>,
-    arch: String,
-}
-
-impl Vendor for RpmVendor {
-    async fn get_options(&self, name: &str) -> VendorResult<HashSet<Version>> {
-        // Query RPM repos for available versions
-        // ...
-    }
-
-    async fn resolve(&self, name: &str, version: &Version) -> VendorResult<Node> {
-        // Find RPM package URL
-        // Create RPM source for the package
-        // ...
-    }
-
-    async fn get_dependencies(&self, name: &str, version: &Version) -> VendorResult<Option<HashMap<String, VersionReq>>> {
-        // Get dependencies from RPM metadata
-        // ...
-    }
-}
-```
+Anything beyond OCI (npm, cargo, rpm, deb, …) currently requires a
+third-party WebAssembly plugin implementing the `vendor` WIT resource.
+There are no built-in npm/rpm vendors — earlier drafts of this document
+listed those as examples and should be treated as **planned / aspirational**.
 
 ## 6. Lock File Management
 
-The Source component manages dependency lock files to ensure reproducible builds:
+Persisted as `edo.lock.json` at the project root (gitignored by the default
+`.gitignore` pattern `**.lock.json`). Serialised by
+`crates/edo-core/src/context/lock.rs` (`Lock` struct). At a conceptual
+level:
 
-```rust
-pub struct DependencyLock {
-    version: String,
-    entries: HashMap<Addr, ResolvedDependency>,
-}
-
-impl DependencyLock {
-    pub fn save(&self, path: &Path) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
-        Ok(())
-    }
-
-    pub fn load(path: &Path) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let lock: Self = serde_json::from_str(&content)?;
-        Ok(lock)
-    }
-
-    pub fn update(&mut self, resolutions: HashMap<Addr, (String, String, Version)>) -> Result<()> {
-        for (addr, (vendor, name, version)) in resolutions {
-            let resolved = ResolvedDependency {
-                vendor,
-                name,
-                version,
-                digest: compute_digest(&vendor, &name, &version)?,
-            };
-            self.entries.insert(addr, resolved);
-        }
-        Ok(())
-    }
+```jsonc
+{
+  "version": "1",
+  "digest":  "<blake3 of the normalised manifest>",
+  "resolved": {
+    "//hello_oci/gcc": { "kind": "source", "name": "image", ... }
+    // one entry per resolved [requires.*] / vendored dep
+  }
 }
 ```
+
+Workflow:
+
+- `edo update` — re-runs the resolver across every registered vendor and
+  rewrites `edo.lock.json`.
+- Other subcommands (`run`, `checkout`, `prune`, `list`) load with
+  `locked = true`. If the manifest digest matches the lock digest, no
+  vendor network calls are made; nodes are rehydrated straight from the
+  lock file.
+- If the digests disagree, the CLI requires an explicit `edo update` to
+  advance the lock (no silent resolution on critical-path commands).
 
 ## 7. Error Handling
 
-The Source component uses comprehensive error types for different failure scenarios:
+Source and vendor errors are unified under one enum in
+`crates/edo-core/src/source/error.rs`:
 
 ```rust
-/// Type alias for source operation results
 pub type SourceResult<T> = Result<T, SourceError>;
 
-/// Source error types
 #[derive(Debug, Snafu)]
 pub enum SourceError {
-    /// Source not found at address
-    #[snafu(display("Source not found at address {}", addr))]
-    SourceNotFound { addr: Addr },
+    // storage / env plumbing via #[snafu(transparent)]
+    Storage     { source: StorageError },
+    Environment { source: EnvironmentError },
 
-    /// Error fetching source
-    #[snafu(display("Failed to fetch source: {}", reason))]
-    FetchFailed { reason: String },
+    // fetch / stage failures
+    Fetch     { reason: String },
+    Stage     { reason: String },
 
-    /// Error staging source
-    #[snafu(display("Failed to stage source: {}", reason))]
-    StageFailed { reason: String },
-
-    /// Error accessing storage
-    #[snafu(display("Storage error: {}", source))]
-    Storage { source: StorageError },
-
-    /// Error accessing environment
-    #[snafu(display("Environment error: {}", source))]
-    Environment { source: EnvError },
-
-    /// Invalid source configuration
-    #[snafu(display("Invalid source configuration: {}", reason))]
-    InvalidConfig { reason: String },
-}
-
-/// Type alias for vendor operation results
-pub type VendorResult<T> = Result<T, VendorError>;
-
-/// Vendor error types
-#[derive(Debug, Snafu)]
-pub enum VendorError {
-    /// Package not found
-    #[snafu(display("Package '{}' not found in vendor", name))]
-    PackageNotFound { name: String },
-
-    /// Version not found
-    #[snafu(display("Version '{}' of package '{}' not found", version, name))]
-    VersionNotFound { name: String, version: String },
-
-    /// Network error
-    #[snafu(display("Network error accessing vendor: {}", reason))]
-    NetworkError { reason: String },
-
-    /// Authentication error
-    #[snafu(display("Authentication failed for vendor: {}", reason))]
-    AuthError { reason: String },
-
-    /// Invalid vendor configuration
-    #[snafu(display("Invalid vendor configuration: {}", reason))]
-    InvalidConfig { reason: String },
-}
-
-/// Resolution error types
-#[derive(Debug, Snafu)]
-pub enum ResolutionError {
-    /// Unsolvable dependency resolution
-    #[snafu(display("Cannot resolve dependencies: {}", reason))]
-    Resolution { reason: String },
-
-    /// Requirement not satisfiable
-    #[snafu(display("Cannot satisfy requirement {} {}", name, version))]
+    // resolver failures
+    Resolution  { reason: String },
     Requirement { name: String, version: VersionReq },
+
+    // config / node validation
+    InvalidConfig { reason: String },
+    // ... plus per-implementation variants (OCI, git, remote, …)
 }
 ```
 
+Individual plugin implementations (e.g. `error::ImageSourceError`,
+`error::RemoteSourceError`) define their own enums and bubble into
+`SourceError` via `#[snafu(transparent)]`, matching the pattern used
+throughout `edo-core`.
+
 ## 8. Implementation Considerations
 
-### 8.1 Performance Optimizations
+### 8.1 Performance
 
-- **Parallel Resolution**: Resolve independent dependencies in parallel
-- **Caching**: Cache resolution results and vendor queries
-- **Lazy Fetching**: Only fetch sources when actually needed
-- **Artifact Deduplication**: Avoid duplicate fetches through storage coordination
+- **Pre-fetch pass**: `Scheduler` calls `Graph::fetch` before running any
+  transforms, amortising source downloads across the DAG.
+- **Cache hierarchy**: `//edo-source-cache/<name>` remote caches pull into
+  `//edo-local-cache` via `Storage::fetch_source`, so only a true first
+  fetch touches the network.
+- **Resolver pooling**: `resolvo` interns names, versions, and version
+  sets once per `build_db` call.
 
-### 8.2 Security Considerations
+### 8.2 Security
 
-- **Integrity Verification**: Validate source integrity through cryptographic hashes
-- **Network Isolation**: Allow control over network access during source operations
-- **Vendor Authentication**: Secure management of authentication credentials
+- `RemoteSource` requires an expected digest (`ref`); mismatch aborts the
+  fetch.
+- `ImageSource` records the computed merkle digest of the manifest list,
+  so the `Source::get_unique_id` is content-addressed.
+- Vendor authentication (ECR / private registries) is handled by the
+  `aws-sdk-ecr` and `aws-sdk-ecrpublic` SDKs; Edo itself does not persist
+  credentials.
 
 ### 8.3 Extensibility
 
-- **Plugin Architecture**: Support custom source and vendor implementations
-- **New Source Types**: Easily add new source acquisition methods
-- **New Vendor Types**: Support additional package ecosystems
+- Additional source kinds ship as in-process additions to
+  `edo-core-plugin` or as out-of-process WebAssembly plugins authored
+  against `edo-plugin-sdk`.
+- `Vendor` plugins only need to satisfy the three async methods on the
+  `vendor` WIT resource to plug into the resolver.
 
 ## 9. Testing Strategy
 
-Testing for the Source component will focus on:
+1. **Unit tests** — per-implementation tests for `LocalSource`,
+   `GitSource`, `RemoteSource`, `ImageSource`, `VendorSource`, and
+   `ImageVendor`.
+2. **Resolver tests** — constraint-satisfaction scenarios against
+   synthetic vendors.
+3. **Integration** — the `examples/hello_rust` and `examples/hello_oci`
+   projects double as end-to-end smoke tests (the OCI example is
+   currently flagged as broken in `examples/README.md`).
+4. **Lock file round-trip** — `Lock::save` then `Lock::load` equality and
+   digest stability.
+5. **Failure injection** — network errors, digest mismatches, unresolvable
+   requirements.
 
-1. **Unit Tests**: Verify individual source and vendor implementations
-2. **Integration Tests**: Test dependency resolution and artifact acquisition
-3. **Network Tests**: Test network source retrieval (with mocking)
-4. **Lock File Tests**: Validate generation and usage of lock files
-5. **Failure Tests**: Test error handling for various failure scenarios
+## 10. Future Enhancements (planned, not implemented)
 
-## 10. Future Enhancements
-
-1. **Signed Sources**: Support for cryptographically signed sources
-2. **Proxy Support**: Enhanced proxy configuration for network access
-3. **Mirror Selection**: Automatic selection of fastest mirror
-4. **Patch Application**: Apply patches to sources during fetch
-5. **Delta Downloads**: Support for incremental/delta source updates
+1. **Signed sources** — verify OCI cosign signatures or detached
+   signatures on `RemoteSource`.
+2. **Additional built-in vendors** — npm, cargo, deb/rpm, maven. Currently
+   these require third-party wasm plugins; they are listed here only as
+   aspirational targets.
+3. **Delta / resumable downloads** for `RemoteSource`.
+4. **Patch application** between fetch and stage.
+5. **Mirror selection** with latency-based fallback.

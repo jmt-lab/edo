@@ -231,7 +231,7 @@ impl Context {
                     .await?,
                 error::NoProviderSnafu {
                     component: component.to_string(),
-                    kind: kind
+                    kind
                 }
             );
             Ok(plugin.value().clone())

@@ -1,5 +1,9 @@
 use snafu::Snafu;
 
+/// Errors produced by the environment subsystem.
+///
+/// Covers failures from environment setup, command execution, storage access,
+/// plugin invocation, and handlebars template rendering used by [`super::Command`].
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub))]
 pub enum EnvironmentError {

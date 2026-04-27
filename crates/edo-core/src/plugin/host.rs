@@ -28,14 +28,14 @@ impl Default for Host {
     }
 }
 
-impl Into<host::Component> for Component {
-    fn into(self) -> host::Component {
-        match self {
-            Self::Environment => host::Component::Environment,
-            Self::Source => host::Component::Source,
-            Self::StorageBackend => host::Component::StorageBackend,
-            Self::Vendor => host::Component::Vendor,
-            Self::Transform => host::Component::Transform,
+impl From<Component> for host::Component {
+    fn from(val: Component) -> Self {
+        match val {
+            Component::Environment => host::Component::Environment,
+            Component::Source => host::Component::Source,
+            Component::StorageBackend => host::Component::StorageBackend,
+            Component::Vendor => host::Component::Vendor,
+            Component::Transform => host::Component::Transform,
         }
     }
 }
