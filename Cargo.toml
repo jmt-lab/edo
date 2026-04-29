@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-default-members = ["crates/edo"]
+default-members = ["crates/cli"]
 members = [
+    "crates/cli",
     "crates/edo",
-    "crates/edo-core",
-    "crates/plugins/edo-core-plugin",
+    "crates/core",
 ]
 exclude = [".edo/", "examples/"]
 
@@ -44,11 +44,11 @@ futures-util = "0.3"
 handlebars = "6.4"
 home = "0.5"
 indexmap = "2.14"
-indicatif = "0.17"
+indicatif = "0.18"
 keyring = "3.6"
 merkle_hash = "3.8"
 names = { version = "0.14", features = [], default-features = false }
-ocilot = { git = "https://github.com/awslabs/ocilot.git" }
+ocilot = "0.1"
 os_pipe = "1.2"
 owo-colors = { version = "4.3", features = ["supports-colors"] }
 parking_lot = { version = "0.12", features = ["send_guard"] }
