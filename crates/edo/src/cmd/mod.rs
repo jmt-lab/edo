@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 pub use checkout::*;
 use edo_core::context::Node;
 use edo_core::context::{Addr, Context, LogVerbosity};
-use edo_core_plugin::core_plugin;
+use edo_core_plugin::register_core;
 pub use list::*;
 pub use prune::*;
 pub use run::*;
@@ -38,9 +38,8 @@ pub async fn create_context(
         verbosity,
     )
     .await?;
-    // Now we want to ensure we add the core plugin here
-    ctx.add_preloaded_plugin(&Addr::parse("edo").unwrap(), &core_plugin())
-        .await?;
+    // Register all core component handlers
+    register_core(&ctx);
     // Register a local farm in the project directory
     ctx.add_farm(
         &Addr::parse("//default").unwrap(),

@@ -182,7 +182,7 @@ pub mod error {
     use snafu::Snafu;
 
     use edo_core::{
-        plugin::error::PluginError,
+        context::error::ContextError,
         source::SourceError,
         storage::{ArtifactBuilderError, IdBuilderError},
     };
@@ -221,9 +221,9 @@ pub mod error {
         }
     }
 
-    impl From<RemoteSourceError> for PluginError {
+    impl From<RemoteSourceError> for ContextError {
         fn from(value: RemoteSourceError) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

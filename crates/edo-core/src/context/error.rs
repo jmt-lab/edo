@@ -88,7 +88,7 @@ pub enum ContextError {
         addr: Addr,
     },
     /// No loaded plugin supports the requested component kind.
-    #[snafu(display("no plugin is loaded that supports a {component} of kind {kind}"))]
+    #[snafu(display("no implementation is loaded that supports a {component} of kind {kind}"))]
     NoProvider {
         /// The component type being requested.
         component: String,
@@ -107,11 +107,11 @@ pub enum ContextError {
     /// The block is not a vendor definition.
     #[snafu(display("block is not a vendor definition"))]
     NotVendor,
-    /// A plugin subsystem error.
+    /// A component subsystem error.
     #[snafu(transparent)]
-    Plugin {
+    Component {
         /// The underlying plugin error.
-        source: crate::plugin::error::PluginError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// An environment subsystem error.
     #[snafu(transparent)]

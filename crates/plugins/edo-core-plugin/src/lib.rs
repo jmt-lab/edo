@@ -1,18 +1,16 @@
 #[macro_use]
 extern crate tracing;
 
-use async_trait::async_trait;
 use edo_core::{
-    context::{Addr, Component, Context, Definable, DefinableNoContext, Log, Node},
+    context::{Context, Definable, DefinableNoContext},
     environment::Farm,
-    plugin::{Plugin, PluginImpl, Result as PluginResult},
     source::{Source, Vendor},
-    storage::{Backend, Storage},
+    storage::Backend,
     transform::Transform,
 };
 use environment::{ContainerFarm, LocalFarm};
-use snafu::OptionExt;
 use source::{GitSource, ImageSource, LocalSource, RemoteSource, VendorSource};
+use std::sync::Arc;
 use storage::S3Backend;
 use transform::{ComposeTransform, ImportTransform, ScriptTransform};
 use vendor::ImageVendor;
@@ -27,127 +25,90 @@ pub mod transform;
 /// Vendors
 pub mod vendor;
 
-pub fn core_plugin() -> Plugin {
-    Plugin::new(CorePlugin)
+pub fn register_core(ctx: &Context) {
+    let registry = ctx.registry();
+    registry.register_backend(
+        "s3",
+        Arc::new(async |addr, node, ctx: Context| {
+            Ok(Backend::new(
+                S3Backend::new(&addr, &node, ctx.config()).await?,
+            ))
+        }),
+    );
+    registry.register_farm(
+        "local",
+        Arc::new(async |addr, node, ctx| Ok(Farm::new(LocalFarm::new(&addr, &node, &ctx).await?))),
+    );
+    registry.register_farm(
+        "container",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Farm::new(ContainerFarm::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_source(
+        "git",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Source::new(GitSource::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_source(
+        "local",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Source::new(LocalSource::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_source(
+        "image",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Source::new(ImageSource::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_source(
+        "remote",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Source::new(RemoteSource::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_source(
+        "vendor",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Source::new(VendorSource::new(&addr, &node, &ctx).await?))
+        }),
+    );
+    registry.register_transform(
+        "compose",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Transform::new(
+                ComposeTransform::new(&addr, &node, &ctx).await?,
+            ))
+        }),
+    );
+    registry.register_transform(
+        "import",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Transform::new(
+                ImportTransform::new(&addr, &node, &ctx).await?,
+            ))
+        }),
+    );
+    registry.register_transform(
+        "script",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Transform::new(
+                ScriptTransform::new(&addr, &node, &ctx).await?,
+            ))
+        }),
+    );
+    registry.register_vendor(
+        "image",
+        Arc::new(async |addr, node, ctx| {
+            Ok(Vendor::new(ImageVendor::new(&addr, &node, &ctx).await?))
+        }),
+    );
 }
-
-/// This acts as our inline plugin for all builtin constructs
-#[derive(Default)]
-pub struct CorePlugin;
-
-#[async_trait]
-impl PluginImpl for CorePlugin {
-    async fn fetch(&self, _log: &Log, _storage: &Storage) -> PluginResult<()> {
-        Ok(())
-    }
-
-    async fn setup(&self, _log: &Log, _storage: &Storage) -> PluginResult<()> {
-        Ok(())
-    }
-
-    async fn supports(
-        &self,
-        _ctx: &Context,
-        component: Component,
-        kind: String,
-    ) -> PluginResult<bool> {
-        Ok(match component {
-            Component::StorageBackend => kind == "s3",
-            Component::Environment => kind == "local" || kind == "container",
-            Component::Source => match kind.as_str() {
-                "git" | "local" | "image" | "remote" | "vendor" => true,
-                _ => false,
-            },
-            Component::Transform => match kind.as_str() {
-                "compose" | "import" | "script" => true,
-                _ => false,
-            },
-            Component::Vendor => kind.as_str() == "image",
-        })
-    }
-
-    async fn create_storage(
-        &self,
-        addr: &Addr,
-        node: &Node,
-        ctx: &Context,
-    ) -> PluginResult<Backend> {
-        let kind = node.get_kind().context(error::NoKindSnafu)?;
-        match kind.as_str() {
-            "s3" => Ok(Backend::new(
-                S3Backend::new(addr, node, ctx.config()).await?,
-            )),
-            _ => error::NoBackendSnafu { kind }.fail().map_err(|e| e.into()),
-        }
-    }
-
-    async fn create_farm(&self, addr: &Addr, node: &Node, ctx: &Context) -> PluginResult<Farm> {
-        let kind = node.get_kind().context(error::NoKindSnafu)?;
-        match kind.as_str() {
-            "local" => Ok(Farm::new(LocalFarm::new(addr, node, ctx).await?)),
-            "container" => Ok(Farm::new(ContainerFarm::new(addr, node, ctx).await?)),
-            _ => error::NoFarmSnafu { kind }.fail().map_err(|e| e.into()),
-        }
-    }
-
-    async fn create_source(&self, addr: &Addr, node: &Node, ctx: &Context) -> PluginResult<Source> {
-        let kind = node.get_kind().context(error::NoKindSnafu)?;
-        debug!(
-            section = "core-plugin",
-            component = "source",
-            "create source {addr} with kind {kind}"
-        );
-        match kind.as_str() {
-            "git" => Ok(Source::new(GitSource::new(addr, node, ctx).await?)),
-            "local" => Ok(Source::new(LocalSource::new(addr, node, ctx).await?)),
-            "image" => Ok(Source::new(ImageSource::new(addr, node, ctx).await?)),
-            "remote" => Ok(Source::new(RemoteSource::new(addr, node, ctx).await?)),
-            "vendor" => Ok(Source::new(VendorSource::new(addr, node, ctx).await?)),
-            _ => error::NoSourceSnafu { kind }.fail().map_err(|e| e.into()),
-        }
-    }
-
-    async fn create_transform(
-        &self,
-        addr: &Addr,
-        node: &Node,
-        ctx: &Context,
-    ) -> PluginResult<Transform> {
-        let kind = node.get_kind().context(error::NoKindSnafu)?;
-        debug!(
-            section = "core-plugin",
-            component = "transform",
-            "create transform {addr} with kind {kind}"
-        );
-        match kind.as_str() {
-            "compose" => Ok(Transform::new(
-                ComposeTransform::new(addr, node, ctx).await?,
-            )),
-            "import" => Ok(Transform::new(
-                ImportTransform::new(addr, node, ctx).await?,
-            )),
-            "script" => Ok(Transform::new(
-                ScriptTransform::new(addr, node, ctx).await?,
-            )),
-            _ => error::NoTransformSnafu { kind }
-                .fail()
-                .map_err(|e| e.into()),
-        }
-    }
-
-    async fn create_vendor(&self, addr: &Addr, node: &Node, ctx: &Context) -> PluginResult<Vendor> {
-        let kind = node.get_kind().context(error::NoKindSnafu)?;
-        match kind.as_str() {
-            "image" => Ok(Vendor::new(ImageVendor::new(addr, node, ctx).await?)),
-            _ => error::NoVendorSnafu { kind }.fail().map_err(|e| e.into()),
-        }
-    }
-}
-
 pub mod error {
+    use edo_core::context::ContextError;
     use snafu::Snafu;
-
-    use edo_core::plugin::error::PluginError;
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
@@ -186,9 +147,9 @@ pub mod error {
         NoVendor { kind: String },
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

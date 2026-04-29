@@ -35,10 +35,6 @@ pub mod error {
             source: edo_core::transform::TransformError,
         },
         #[snafu(transparent)]
-        Plugin {
-            source: edo_core::plugin::error::PluginError,
-        },
-        #[snafu(transparent)]
         Core {
             source: edo_core_plugin::error::Error,
         },

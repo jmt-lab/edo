@@ -6,16 +6,16 @@
 //! It also re-exports the [`non_configurable!`] and
 //! [`non_configurable_no_context!`] convenience macros.
 
-use std::collections::{BTreeMap, HashMap};
-use std::fs::{File, read, read_dir};
-use std::path::{Path, PathBuf};
-use snafu::{OptionExt, ResultExt};
 use super::Context;
 use super::address::Addr;
 use super::lock::Lock;
 use super::{ContextResult as Result, FromNode, Node, error};
 use crate::context::schema::Schema;
 use crate::source::{Dependency, Resolver};
+use snafu::{OptionExt, ResultExt};
+use std::collections::{BTreeMap, HashMap};
+use std::fs::{File, read, read_dir};
+use std::path::{Path, PathBuf};
 
 /// Intermediate representation of a loaded edo project.
 ///
@@ -27,7 +27,6 @@ pub struct Project {
     build_cache: Option<Node>,
     output_cache: Option<Node>,
     vendors: BTreeMap<Addr, Node>,
-    plugins: BTreeMap<Addr, Node>,
     environments: BTreeMap<Addr, Node>,
     transforms: BTreeMap<Addr, Node>,
     need_resolution: BTreeMap<Addr, Node>,
@@ -47,24 +46,31 @@ fn handle_sources(namespace: &Addr, node: &Node, sources: &BTreeMap<Addr, Node>)
                 namespace.join(&addr)
             };
             info!("checking for source at: {caddr}");
-            table.insert("source".into(), sources.get(&caddr).context(error::NotValidSourceSnafu {
-                id: addr
-            })?.clone());
+            table.insert(
+                "source".into(),
+                sources
+                    .get(&caddr)
+                    .context(error::NotValidSourceSnafu { id: addr })?
+                    .clone(),
+            );
         } else if let Some(list) = src.as_list() {
             let mut items = Vec::new();
             for item in list.iter() {
                 let addr = item.as_string().context(error::FieldSnafu {
                     field: "requires",
-                    type_: "array of string / string"
+                    type_: "array of string / string",
                 })?;
                 let caddr = if addr.starts_with("//") {
                     Addr::parse(&addr)?
                 } else {
                     namespace.join(&addr)
                 };
-                items.push(sources.get(&caddr).context(error::NotValidSourceSnafu {
-                    id: addr
-                })?.clone());
+                items.push(
+                    sources
+                        .get(&caddr)
+                        .context(error::NotValidSourceSnafu { id: addr })?
+                        .clone(),
+                );
             }
             table.insert("source".into(), Node::new_list(items));
         }
@@ -94,7 +100,6 @@ impl Project {
             build_cache: None,
             output_cache: None,
             vendors: BTreeMap::new(),
-            plugins: BTreeMap::new(),
             environments: BTreeMap::new(),
             transforms: BTreeMap::new(),
             need_resolution: BTreeMap::new(),
@@ -110,13 +115,7 @@ impl Project {
         for entry in read {
             let entry = entry.context(error::IoSnafu)?;
             let path = entry.path();
-            if path.is_file()
-                && path
-                    .file_name()
-                    .and_then(|x| x.to_str())
-                    .unwrap()
-                   == "edo.toml"
-            {
+            if path.is_file() && path.file_name().and_then(|x| x.to_str()).unwrap() == "edo.toml" {
                 // This is a barkml defined build file
                 self.load_toml(namespace, &path)?;
             } else if path.is_dir() {
@@ -149,11 +148,6 @@ impl Project {
                 }
                 self.build_cache = config.get_build_cache()?;
                 self.output_cache = config.get_output_cache()?;
-                for (name, node) in config.get_plugins()? {
-                    let addr = namespace.join(&name);
-                    let cnode = handle_sources(namespace, &node, &sources)?;
-                    self.plugins.insert(addr, cnode);
-                }
                 for (name, node) in config.get_environments()? {
                     let addr = namespace.join(&name);
                     let cnode = handle_sources(namespace, &node, &sources)?;
@@ -193,10 +187,6 @@ impl Project {
                         .context(error::MalformedLockSnafu { addr: addr.clone() })?;
                     node.set_data(&resolved.data());
                 }
-                // Resolve all plugins
-                for (addr, node) in self.plugins.iter() {
-                    ctx.add_plugin(addr, node).await?;
-                }
                 for (addr, node) in self.environments.iter() {
                     ctx.add_farm(addr, node).await?;
                 }
@@ -210,25 +200,17 @@ impl Project {
             }
         }
 
-        // Plugins cannot have vendored sources as they need to be resolved first
-        for (addr, node) in self.plugins.iter() {
-            debug!(
-                section = "context",
-                component = "project",
-                "adding plugin {addr}"
-            );
-            ctx.add_plugin(addr, node).await?;
-        }
-
         // Resolve all storage backends
         for (addr, node) in self.source_caches.iter() {
             ctx.add_cache(addr, node).await?;
         }
         if let Some(node) = self.build_cache.as_ref() {
-            ctx.add_cache(&Addr::parse("//edo-build-cache")?, node).await?;
+            ctx.add_cache(&Addr::parse("//edo-build-cache")?, node)
+                .await?;
         }
         if let Some(node) = self.output_cache.as_ref() {
-            ctx.add_cache(&Addr::parse("//edo-output-cache")?, node).await?;
+            ctx.add_cache(&Addr::parse("//edo-output-cache")?, node)
+                .await?;
         }
 
         // Vendor's are only used during project resolution

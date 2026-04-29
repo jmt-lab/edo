@@ -18,27 +18,27 @@ use chrono::Local;
 use indicatif::{ProgressState, ProgressStyle};
 use owo_colors::{OwoColorize, Stream};
 use parking_lot::{Mutex, MutexGuard};
-use rand::{rng, RngExt};
+use rand::{RngExt, rng};
 use snafu::ResultExt;
 use tokio::fs::{create_dir_all, remove_dir_all};
 use tracing::{
+    Event, Level, Subscriber,
     field::{Field, Visit},
     level_filters::LevelFilter,
-    Event, Level, Subscriber,
 };
 use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::{
+    Layer,
     field::RecordFields,
     filter::Targets,
-    fmt::{format::Writer, FmtContext, FormatEvent, FormatFields, FormattedFields},
+    fmt::{FmtContext, FormatEvent, FormatFields, FormattedFields, format::Writer},
     layer::SubscriberExt,
     registry::LookupSpan,
     util::SubscriberInitExt,
-    Layer,
 };
 
 pub use super::Log;
-use super::{error, ContextResult as Result};
+use super::{ContextResult as Result, error};
 
 const DEBUG_ONLY: &[&str] = &[];
 const TRACE_ONLY: &[&str] = &[

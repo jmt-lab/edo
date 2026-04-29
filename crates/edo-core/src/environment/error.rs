@@ -16,11 +16,6 @@ pub enum EnvironmentError {
     Implementation {
         source: Box<dyn snafu::Error + Send + Sync>,
     },
-    #[snafu(transparent)]
-    Plugin {
-        #[snafu(source(from(crate::plugin::error::PluginError, Box::new)))]
-        source: Box<crate::plugin::error::PluginError>,
-    },
     #[snafu(display("command execution failed"))]
     Run,
     #[snafu(transparent)]

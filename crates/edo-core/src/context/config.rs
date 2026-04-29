@@ -7,7 +7,7 @@
 //! components that need no configuration. [`Config`] loads and queries the
 //! user-level configuration file.
 
-use super::{error, Addr, Context, ContextResult as Result, FromNode, FromNodeNoContext, Node};
+use super::{Addr, Context, ContextResult as Result, FromNode, FromNodeNoContext, Node, error};
 use async_trait::async_trait;
 use home::home_dir;
 use snafu::{OptionExt, ResultExt};
@@ -130,7 +130,9 @@ impl Config {
         let path = if let Some(path) = path {
             path.as_ref().to_path_buf()
         } else {
-            home_dir().context(error::HomeSnafu)?.join(".config/edo.toml")
+            home_dir()
+                .context(error::HomeSnafu)?
+                .join(".config/edo.toml")
         };
         if !path.exists() {
             return Ok(Self {

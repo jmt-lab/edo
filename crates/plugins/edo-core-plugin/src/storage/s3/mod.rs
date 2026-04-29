@@ -6,9 +6,9 @@ use aws_sdk_s3::{
     types::{CompletedMultipartUpload, CompletedPart},
 };
 use edo_core::{
-    context::{Addr, Config, FromNodeNoContext, Node},
+    context::{Addr, Config, Context, ContextResult, DefinableNoContext, FromNodeNoContext, Node},
     non_configurable_no_context,
-    storage::{Artifact, BackendImpl, Id, Layer, LayerBuilder, MediaType, StorageResult},
+    storage::{Artifact, Backend, BackendImpl, Id, Layer, LayerBuilder, MediaType, StorageResult},
     util::{Reader, Writer},
 };
 use ocilot::models::Platform;
@@ -65,6 +65,10 @@ impl FromNodeNoContext for S3Backend {
 non_configurable_no_context!(S3Backend, edo_core::storage::StorageError);
 
 impl S3Backend {
+    pub async fn create(addr: &Addr, node: &Node, ctx: &Context) -> ContextResult<Backend> {
+        Ok(Backend::new(Self::new(addr, node, ctx.config()).await?))
+    }
+
     pub async fn new_(
         sdk_config: &SdkConfig,
         bucket: &str,

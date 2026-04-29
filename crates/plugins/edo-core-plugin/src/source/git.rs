@@ -158,7 +158,7 @@ impl SourceImpl for GitSource {
 }
 
 pub mod error {
-    use edo_core::{plugin::error::PluginError, source::SourceError, storage::IdBuilderError};
+    use edo_core::{context::error::ContextError, source::SourceError, storage::IdBuilderError};
     use snafu::Snafu;
 
     #[derive(Snafu, Debug)]
@@ -189,9 +189,9 @@ pub mod error {
         }
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

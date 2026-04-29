@@ -1,5 +1,5 @@
-use futures::future::BoxFuture;
 use futures::Future;
+use futures::future::BoxFuture;
 use std::io::{self, Read};
 use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};

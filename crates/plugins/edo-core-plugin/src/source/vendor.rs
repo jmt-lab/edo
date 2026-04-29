@@ -227,7 +227,7 @@ impl SourceImpl for VendorSource {
 pub mod error {
     use snafu::Snafu;
 
-    use edo_core::{context::ContextError, plugin::error::PluginError, source::SourceError};
+    use edo_core::{context::ContextError, source::SourceError};
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
@@ -261,9 +261,9 @@ pub mod error {
         }
     }
 
-    impl From<VendorError> for PluginError {
+    impl From<VendorError> for ContextError {
         fn from(value: VendorError) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

@@ -1,12 +1,12 @@
+use super::Environment;
+use super::{EnvResult, error};
+use crate::context::Log;
+use crate::storage::Id;
+use handlebars::Handlebars;
+use snafu::{ResultExt, ensure};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
-use handlebars::Handlebars;
-use snafu::{ensure, ResultExt};
-use crate::context::Log;
-use crate::storage::Id;
-use super::Environment;
-use super::{error, EnvResult};
 
 /// A Command represents a delayed series of commands to run inside of an environment.
 ///

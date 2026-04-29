@@ -6,11 +6,11 @@
 //! three cache categories (source, build, output). The [`toml_def_item`]
 //! helper converts a raw TOML table entry into a [`Node`] definition.
 
-use std::collections::BTreeMap;
-use serde::{Serialize, Deserialize};
-use snafu::OptionExt;
-use toml::map::Map;
 use crate::context::{ContextResult, Node, error};
+use serde::{Deserialize, Serialize};
+use snafu::OptionExt;
+use std::collections::BTreeMap;
+use toml::map::Map;
 
 /// Top-level schema envelope, dispatching on the `schema-version` field.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,8 +40,6 @@ pub struct SchemaV1 {
     #[serde(default)]
     cache: Cache,
     #[serde(default)]
-    plugin: BTreeMap<String, toml::Value>,
-    #[serde(default)]
     environment: BTreeMap<String, toml::Value>,
     #[serde(default)]
     source: BTreeMap<String, toml::Value>,
@@ -65,17 +63,21 @@ fn toml_map(table: &toml::map::Map<String, toml::Value>) -> ContextResult<BTreeM
 /// the `kind` field and wrapping the remainder as the node's table.
 fn toml_def_item(id: &str, name: &str, inner: &Map<String, toml::Value>) -> ContextResult<Node> {
     let mut shape = inner.clone();
-    let kind = shape.remove("kind")
+    let kind = shape
+        .remove("kind")
         .and_then(|x| x.as_str().map(|x| x.to_string()))
         .context(error::FieldSnafu {
-        field: "kind",
-        type_: "string"
-    })?;
+            field: "kind",
+            type_: "string",
+        })?;
     let node_table = toml_map(&shape)?;
     Ok(Node::new_definition(id, &kind, name, node_table))
 }
 
-fn toml_def(table: &BTreeMap<String, toml::Value>, id: &str) -> ContextResult<BTreeMap<String, Node>> {
+fn toml_def(
+    table: &BTreeMap<String, toml::Value>,
+    id: &str,
+) -> ContextResult<BTreeMap<String, Node>> {
     let mut tree = BTreeMap::new();
     for (name, config) in table.iter() {
         if let Some(inner) = config.as_table() {
@@ -96,7 +98,7 @@ impl SchemaV1 {
         if let Some(data) = self.cache.build.as_ref() {
             let table = data.as_table().context(error::FieldSnafu {
                 field: "build_cache",
-                type_: "table"
+                type_: "table",
             })?;
             Ok(Some(toml_def_item("backend", "build_cache", table)?))
         } else {
@@ -109,7 +111,7 @@ impl SchemaV1 {
         if let Some(data) = self.cache.output.as_ref() {
             let table = data.as_table().context(error::FieldSnafu {
                 field: "output_cache",
-                type_: "table"
+                type_: "table",
             })?;
             Ok(Some(toml_def_item("backend", "output_cache", table)?))
         } else {
@@ -120,11 +122,6 @@ impl SchemaV1 {
     /// Returns the user-level config entries as nodes.
     pub fn get_config(&self) -> ContextResult<BTreeMap<String, Node>> {
         toml_map(&self.config)
-    }
-
-    /// Returns the plugin definitions as nodes.
-    pub fn get_plugins(&self) -> ContextResult<BTreeMap<String, Node>> {
-        toml_def(&self.plugin, "plugin")
     }
 
     /// Returns the environment definitions as nodes.

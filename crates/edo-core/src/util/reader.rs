@@ -23,7 +23,7 @@ impl Reader {
     pub fn finish(&self) -> String {
         let lock = self.inner.lock();
         let hash = lock.hash.finalize();
-        
+
         base16::encode_lower(hash.as_bytes())
     }
 }

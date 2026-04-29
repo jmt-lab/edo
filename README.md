@@ -9,7 +9,7 @@ Edo is a modern build tool implemented in Rust that addresses critical limitatio
 ### Key Differentiators
 
 - **Environment Control**: Precise control over build environments without being tied to specific technologies
-- **Extensibility**: WebAssembly-based plugin system that allows customization of any component
+- **Extensibility**: Modular architecture that allows customization of any component
 - **Artifact-Centric Design**: OCI-compatible artifact model for consistent handling across storage backends
 - **Build Reproducibility**: Deterministic builds with comprehensive input tracking
 - **Cross-Platform Support**: Runs on Linux, macOS, and Windows with consistent behavior
@@ -20,7 +20,6 @@ Edo is a modern build tool implemented in Rust that addresses critical limitatio
 - **Powerful Caching**: Multi-level caching with content-addressed storage
 - **Dependency Resolution**: Sophisticated dependency management with version constraint satisfaction
 - **Parallel Execution**: Optimized parallel build execution based on dependency graph
-- **WebAssembly Plugins**: Extend any component with plugins written in any language that compiles to WebAssembly
 - **Declarative TOML Configuration**: Simple, deterministic project manifests (`edo.toml`) with a `schema-version` envelope for forward compatibility
 
 ## Installation
@@ -72,7 +71,7 @@ Edo is built on four core components that work together to provide a flexible, r
         └──────────────────┴──────────────────┴───────────────────┘
                                     │
                             ┌───────▼───────┐
-                            │ Plugin System │
+                            │    Context    │
                             └───────────────┘
 ```
 
@@ -91,10 +90,6 @@ Provides flexible, pluggable control over where and how builds execute. Enables 
 ### Transform Component
 
 Processes input artifacts into output artifacts according to defined build operations. Manages build dependencies and execution order through a directed acyclic graph (DAG).
-
-### Plugin System
-
-Extends any component using WebAssembly-based plugins. Allows customization of the build system without modifying the core codebase.
 
 ## Use Cases
 
@@ -135,7 +130,7 @@ commands = [
 ]
 ```
 
-Top-level sections: `[config]`, `[cache.source.*]` / `[cache.build]` / `[cache.output]`, `[plugin.*]`, `[environment.*]`, `[source.*]`, `[transform.*]`, `[vendor.*]`, `[requires.*]`. Script transform commands are rendered with Handlebars and receive variables such as `{{install-root}}` and `{{build-root}}`.
+Top-level sections: `[config]`, `[cache.source.*]` / `[cache.build]` / `[cache.output]`, `[environment.*]`, `[source.*]`, `[transform.*]`, `[vendor.*]`, `[requires.*]`. Script transform commands are rendered with Handlebars and receive variables such as `{{install-root}}` and `{{build-root}}`.
 
 Builtin kinds shipped by the core plugin:
 
@@ -146,12 +141,6 @@ Builtin kinds shipped by the core plugin:
 | Source          | `git`, `local`, `image`, `remote`, `vendor` |
 | Transform       | `compose`, `import`, `script`               |
 | Vendor          | `image`                                     |
-
-Additional kinds can be supplied by loading a WebAssembly plugin via `[plugin.<name>]`.
-
-## Plugin Development
-
-**TODO: Fill out this section**
 
 ## Contributing
 

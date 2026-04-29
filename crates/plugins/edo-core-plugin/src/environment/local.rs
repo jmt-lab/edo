@@ -240,7 +240,7 @@ pub mod error {
     use snafu::Snafu;
     use std::path::PathBuf;
 
-    use edo_core::{environment::error::EnvironmentError, plugin::error::PluginError};
+    use edo_core::{context::error::ContextError, environment::error::EnvironmentError};
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
@@ -279,9 +279,9 @@ pub mod error {
         }
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

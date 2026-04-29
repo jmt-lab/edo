@@ -5,15 +5,15 @@
 //! command-line arguments without holding a reference to the full
 //! [`Context`](super::Context).
 
-use std::collections::HashMap;
-use std::path::Path;
-use snafu::OptionExt;
-use super::{error, Addr, ContextResult, Log, LogManager};
+use super::{Addr, ContextResult, Log, LogManager, error};
 use crate::{
     environment::{Environment, Farm},
     storage::Storage,
     transform::Transform,
 };
+use snafu::OptionExt;
+use std::collections::HashMap;
+use std::path::Path;
 
 /// A handle is passed to transforms where it needs to look up
 /// things in the transform state.

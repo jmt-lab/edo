@@ -1,6 +1,6 @@
-use super::{error, Result, CHUNK_SIZE};
-use aws_sdk_s3::primitives::AggregatedBytes;
+use super::{CHUNK_SIZE, Result, error};
 use aws_sdk_s3::Client;
+use aws_sdk_s3::primitives::AggregatedBytes;
 use futures::future::BoxFuture;
 use snafu::ResultExt;
 use std::pin::Pin;

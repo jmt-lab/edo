@@ -16,22 +16,22 @@
 //! - Schema — TOML schema deserialization
 //! - Builder — project loading and dependency resolution ([`Project`])
 
-use std::collections::{BTreeMap, HashMap};
-use std::env::current_dir;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use dashmap::DashMap;
-use snafu::{OptionExt, ResultExt, ensure};
-use tokio::fs::create_dir_all;
-use tracing::Instrument;
-use crate::{plugin::WasmPlugin, storage::{Backend, LocalBackend, Storage}};
 use super::{
     environment::Farm,
-    plugin::Plugin,
     scheduler::Scheduler,
     source::{Source, Vendor},
     transform::Transform,
 };
+use crate::context::registry::Registry;
+use crate::storage::{Backend, LocalBackend, Storage};
+use dashmap::DashMap;
+use snafu::ResultExt;
+use std::collections::{BTreeMap, HashMap};
+use std::env::current_dir;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::fs::create_dir_all;
+use tracing::Instrument;
 
 mod address;
 mod builder;
@@ -42,7 +42,9 @@ mod lock;
 mod log;
 mod logmgr;
 mod node;
+mod registry;
 mod schema;
+
 /// Re-exports [`Addr`] and [`Addressable`].
 pub use address::*;
 /// Re-exports [`Project`] and the `non_configurable` macros.
@@ -87,8 +89,8 @@ pub struct Context {
     log: LogManager,
     /// Execution Scheduler
     scheduler: Scheduler,
-    /// Loaded Plugins
-    plugins: ArcMap<Addr, Plugin>,
+    /// Registry of implemented components
+    registry: Registry,
     /// Registered Transforms
     transforms: ArcMap<Addr, Transform>,
     /// Registered Farms
@@ -154,9 +156,9 @@ impl Context {
             args,
             log: log.clone(),
             storage,
+            registry: Registry::default(),
             scheduler: Scheduler::new(&path.join("env"), &config).await?,
             farms: Arc::new(DashMap::new()),
-            plugins: Arc::new(DashMap::new()),
             transforms: Arc::new(DashMap::new()),
         };
         Ok(ctx.clone())
@@ -169,18 +171,21 @@ impl Context {
         Ok(())
     }
 
+    /// Returns the registry you can add new implementations to
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
     /// Creates a read-only [`Handle`] snapshot for use by transforms during execution.
     pub fn get_handle(&self) -> Handle {
         Handle::new(
             self.log.clone(),
             self.storage.clone(),
-            self
-                .transforms
+            self.transforms
                 .iter()
                 .map(|x| (x.key().clone(), x.value().clone()))
                 .collect(),
-            self
-                .farms
+            self.farms
                 .iter()
                 .map(|x| (x.key().clone(), x.value().clone()))
                 .collect(),
@@ -215,75 +220,6 @@ impl Context {
         }
     }
 
-    /// Finds a plugin that supports the given `component` kind from the node.
-    pub async fn find_plugin(&self, component: Component, node: &Node) -> ContextResult<Plugin> {
-        let kind = node.get_kind().unwrap();
-        if let Some((plugin, kind)) = kind.split_once(':') {
-            let paddr = Addr::parse(plugin)?;
-            let plugin = self
-                .plugins
-                .get(&paddr)
-                .context(error::NoPluginSnafu { addr: paddr })?;
-            node.set_kind(kind.to_string());
-            ensure!(
-                plugin
-                    .supports(self, component.clone(), kind.to_string())
-                    .await?,
-                error::NoProviderSnafu {
-                    component: component.to_string(),
-                    kind
-                }
-            );
-            Ok(plugin.value().clone())
-        } else {
-            for plugin in self.plugins.iter() {
-                if plugin
-                    .supports(self, component.clone(), kind.clone())
-                    .await?
-                {
-                    return Ok(plugin.value().clone());
-                }
-            }
-            error::NoProviderSnafu {
-                component: component.to_string(),
-                kind,
-            }
-            .fail()
-        }
-    }
-
-    /// Returns the plugin registered at the given address, if any.
-    pub fn get_plugin(&self, addr: &Addr) -> Option<Plugin> {
-        self.plugins.get(addr).map(|x| x.value().clone())
-    }
-
-    /// Registers a pre-constructed plugin, fetching and setting it up before insertion.
-    pub async fn add_preloaded_plugin(&self, addr: &Addr, plugin: &Plugin) -> ContextResult<()> {
-        let log = self.log.create("init").await?;
-        log.set_subject(&addr.to_string());
-        plugin.fetch(&log, self.storage()).await?;
-        plugin.setup(&log, self.storage()).await?;
-        self.plugins.insert(addr.clone(), plugin.clone());
-        Ok(())
-    }
-
-    /// Creates a new WASM plugin from the given node, fetches and sets it up, then registers it.
-    pub async fn add_plugin(&self, addr: &Addr, node: &Node) -> ContextResult<()> {
-        // Plugins cannot add other plugins so this is a discrete switch operation
-        debug!(
-            section = "context",
-            component = "context",
-            "adding a plugin {addr}"
-        );
-        let plugin = Plugin::new(WasmPlugin::from_node(addr, node, self).await?);
-        let log = self.log.create("init").await?;
-        log.set_subject(&addr.to_string());
-        plugin.fetch(&log, self.storage()).await?;
-        plugin.setup(&log, self.storage()).await?;
-        self.plugins.insert(addr.clone(), plugin);
-        Ok(())
-    }
-
     /// Returns the transform registered at the given address, if any.
     pub fn get_transform(&self, addr: &Addr) -> Option<Transform> {
         self.transforms.get(addr).map(|x| x.value().clone())
@@ -301,8 +237,7 @@ impl Context {
         let backend = if kind == "local" || kind == "edo:local" {
             Backend::new(LocalBackend::new(addr, node, self.config()).await?)
         } else {
-            let plugin = self.find_plugin(Component::StorageBackend, node).await?;
-            plugin.create_storage(addr, node, self).await?
+            self.registry().backend(addr, node, self).await?
         };
         let addr_s = addr.to_string();
         if addr_s == "//edo-build-cache" {
@@ -327,10 +262,9 @@ impl Context {
             component = "context",
             "adding a transform {addr}"
         );
-        let plugin = self.find_plugin(Component::Transform, node).await?;
         self.transforms.insert(
             addr.clone(),
-            plugin.create_transform(addr, node, self).await?,
+            self.registry().transform(addr, node, self).await?,
         );
         Ok(())
     }
@@ -357,10 +291,9 @@ impl Context {
             component = "context",
             "adding a farm {addr}"
         );
-        let plugin = self.find_plugin(Component::Environment, node).await?;
         // If we get here use the core plugin
         self.farms
-            .insert(addr.clone(), plugin.create_farm(addr, node, self).await?);
+            .insert(addr.clone(), self.registry().farm(addr, node, self).await?);
         Ok(())
     }
 
@@ -371,15 +304,13 @@ impl Context {
             component = "context",
             "adding a source {addr}"
         );
-        let plugin = self.find_plugin(Component::Source, node).await?;
-        let result = plugin.create_source(addr, node, self).await?;
+        let result = self.registry().source(addr, node, self).await?;
         Ok(result)
     }
 
     /// Creates a dependency vendor from the given node using the appropriate plugin.
     pub async fn add_vendor(&self, addr: &Addr, node: &Node) -> ContextResult<Vendor> {
-        let plugin = self.find_plugin(Component::Vendor, node).await?;
-        let result = plugin.create_vendor(addr, node, self).await?;
+        let result = self.registry().vendor(addr, node, self).await?;
         Ok(result)
     }
 

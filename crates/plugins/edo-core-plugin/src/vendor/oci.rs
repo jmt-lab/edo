@@ -191,7 +191,7 @@ pub mod error {
     use semver::Version;
     use snafu::Snafu;
 
-    use edo_core::{context::ContextError, plugin::error::PluginError, source::SourceError};
+    use edo_core::{context::ContextError, source::SourceError};
 
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub))]
@@ -219,9 +219,9 @@ pub mod error {
         }
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

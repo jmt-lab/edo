@@ -4,7 +4,6 @@ default-members = ["crates/edo"]
 members = [
     "crates/edo",
     "crates/edo-core",
-    "crates/edo-plugin-sdk",
     "crates/plugins/edo-core-plugin",
 ]
 exclude = [".edo/", "examples/"]
@@ -50,7 +49,6 @@ keyring = "3.6"
 merkle_hash = "3.8"
 names = { version = "0.14", features = [], default-features = false }
 ocilot = { git = "https://github.com/awslabs/ocilot.git" }
-once_cell = { version = "1.21", features = ["parking_lot"] }
 os_pipe = "1.2"
 owo-colors = { version = "4.3", features = ["supports-colors"] }
 parking_lot = { version = "0.12", features = ["send_guard"] }
@@ -80,7 +78,4 @@ tracing-indicatif = { version = "0.3" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v7"] }
 url = "2.5"
-wasmtime = "44.0"
-wasmtime-wasi = "44.0"
-wit-bindgen = "0.57"
 which = "8"

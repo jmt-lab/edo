@@ -1,7 +1,9 @@
 use dashmap::DashMap;
 use resolvo::utils::Pool;
 use resolvo::{
-    Candidates, ConditionalRequirement, Dependencies, DependencyProvider, Interner, KnownDependencies, NameId, Problem, Requirement, SolvableId, Solver, StringId, UnsolvableOrCancelled, VersionSetId, VersionSetUnionId
+    Candidates, ConditionalRequirement, Dependencies, DependencyProvider, Interner,
+    KnownDependencies, NameId, Problem, Requirement, SolvableId, Solver, StringId,
+    UnsolvableOrCancelled, VersionSetId, VersionSetUnionId,
 };
 use semver::Version;
 use std::fmt;
@@ -47,7 +49,10 @@ impl Resolver {
                 .or_default()
                 .insert(entry.addr.clone());
             let requirement = self.build_requirement(entry)?;
-            requirements.push(ConditionalRequirement { condition: None, requirement });
+            requirements.push(ConditionalRequirement {
+                condition: None,
+                requirement,
+            });
         }
         let problem = Problem::new().requirements(requirements);
         let resolution = match solver.solve(problem) {
@@ -343,7 +348,7 @@ impl DependencyProvider for Resolver {
                         .intern_version_set(dep_id, EdoVersionSet::new(matches.as_slice()));
                     known.requirements.push(ConditionalRequirement {
                         condition: None,
-                        requirement: Requirement::Single(vs_id)
+                        requirement: Requirement::Single(vs_id),
                     });
                 }
             }

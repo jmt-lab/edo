@@ -3,7 +3,7 @@ use std::fs::read_to_string;
 use dialoguer::{Editor, Select};
 use tracing_indicatif::suspend_tracing_indicatif;
 
-use super::{error, Result};
+use super::{Result, error};
 use crate::{
     context::{Handle, Log},
     environment::Environment,

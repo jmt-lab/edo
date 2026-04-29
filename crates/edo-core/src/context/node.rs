@@ -271,17 +271,87 @@ macro_rules! get_field {
 }
 
 impl Data {
-    as_fn!(new_bool, as_bool, Bool, bool, "Creates a new boolean data value.", "Returns the boolean value if this is a `Bool` variant.");
-    as_fn!(new_int, as_int, Int, i64, "Creates a new integer data value.", "Returns the integer value if this is an `Int` variant.");
-    as_fn!(new_float, as_float, Float, f64, "Creates a new floating-point data value.", "Returns the float value if this is a `Float` variant.");
-    as_fn!(new_string, as_string, String, String, "Creates a new string data value.", "Returns the string value if this is a `String` variant.");
-    as_fn!(new_version, as_version, Version, Version, "Creates a new semver version data value.", "Returns the version if this is a `Version` variant.");
-    as_fn!(new_require, as_require, Require, VersionReq, "Creates a new version requirement data value.", "Returns the version requirement if this is a `Require` variant.");
-    as_fn!(new_list, as_list, List, Vec<Node>, "Creates a new list data value.", "Returns the list of nodes if this is a `List` variant.");
+    as_fn!(
+        new_bool,
+        as_bool,
+        Bool,
+        bool,
+        "Creates a new boolean data value.",
+        "Returns the boolean value if this is a `Bool` variant."
+    );
+    as_fn!(
+        new_int,
+        as_int,
+        Int,
+        i64,
+        "Creates a new integer data value.",
+        "Returns the integer value if this is an `Int` variant."
+    );
+    as_fn!(
+        new_float,
+        as_float,
+        Float,
+        f64,
+        "Creates a new floating-point data value.",
+        "Returns the float value if this is a `Float` variant."
+    );
+    as_fn!(
+        new_string,
+        as_string,
+        String,
+        String,
+        "Creates a new string data value.",
+        "Returns the string value if this is a `String` variant."
+    );
+    as_fn!(
+        new_version,
+        as_version,
+        Version,
+        Version,
+        "Creates a new semver version data value.",
+        "Returns the version if this is a `Version` variant."
+    );
+    as_fn!(
+        new_require,
+        as_require,
+        Require,
+        VersionReq,
+        "Creates a new version requirement data value.",
+        "Returns the version requirement if this is a `Require` variant."
+    );
+    as_fn!(
+        new_list,
+        as_list,
+        List,
+        Vec<Node>,
+        "Creates a new list data value.",
+        "Returns the list of nodes if this is a `List` variant."
+    );
     as_fn!(new_table, as_table, Table, BTreeMap<String, Node>, "Creates a new table data value.", "Returns the table if this is a `Table` variant.");
-    get_field!(get_id, set_id, id, String, "Returns the definition id if this is a `Definition` variant.", "Sets the definition id if this is a `Definition` variant.");
-    get_field!(get_kind, set_kind, kind, String, "Returns the definition kind if this is a `Definition` variant.", "Sets the definition kind if this is a `Definition` variant.");
-    get_field!(get_name, set_name, name, String, "Returns the definition name if this is a `Definition` variant.", "Sets the definition name if this is a `Definition` variant.");
+    get_field!(
+        get_id,
+        set_id,
+        id,
+        String,
+        "Returns the definition id if this is a `Definition` variant.",
+        "Sets the definition id if this is a `Definition` variant."
+    );
+    get_field!(
+        get_kind,
+        set_kind,
+        kind,
+        String,
+        "Returns the definition kind if this is a `Definition` variant.",
+        "Sets the definition kind if this is a `Definition` variant."
+    );
+    get_field!(
+        get_name,
+        set_name,
+        name,
+        String,
+        "Returns the definition name if this is a `Definition` variant.",
+        "Sets the definition name if this is a `Definition` variant."
+    );
     get_field!(get_table, set_table, table, BTreeMap<String, Node>, "Returns the definition table if this is a `Definition` variant.", "Sets the definition table if this is a `Definition` variant.");
 
     pub(crate) fn append(&mut self, item: Node) {
@@ -322,17 +392,80 @@ macro_rules! node_as {
 }
 
 impl Node {
-    node_as!(new_bool, as_bool, bool, "Creates a new node holding a boolean value.", "Returns the boolean value if the underlying data is a `Bool`.");
-    node_as!(new_int, as_int, i64, "Creates a new node holding an integer value.", "Returns the integer value if the underlying data is an `Int`.");
-    node_as!(new_float, as_float, f64, "Creates a new node holding a floating-point value.", "Returns the float value if the underlying data is a `Float`.");
-    node_as!(new_string, as_string, String, "Creates a new node holding a string value.", "Returns the string value if the underlying data is a `String`.");
-    node_as!(new_version, as_version, Version, "Creates a new node holding a semver version.", "Returns the version if the underlying data is a `Version`.");
-    node_as!(new_require, as_require, VersionReq, "Creates a new node holding a version requirement.", "Returns the version requirement if the underlying data is a `Require`.");
-    node_as!(new_list, as_list, Vec<Node>, "Creates a new node holding a list of child nodes.", "Returns the list of child nodes if the underlying data is a `List`.");
+    node_as!(
+        new_bool,
+        as_bool,
+        bool,
+        "Creates a new node holding a boolean value.",
+        "Returns the boolean value if the underlying data is a `Bool`."
+    );
+    node_as!(
+        new_int,
+        as_int,
+        i64,
+        "Creates a new node holding an integer value.",
+        "Returns the integer value if the underlying data is an `Int`."
+    );
+    node_as!(
+        new_float,
+        as_float,
+        f64,
+        "Creates a new node holding a floating-point value.",
+        "Returns the float value if the underlying data is a `Float`."
+    );
+    node_as!(
+        new_string,
+        as_string,
+        String,
+        "Creates a new node holding a string value.",
+        "Returns the string value if the underlying data is a `String`."
+    );
+    node_as!(
+        new_version,
+        as_version,
+        Version,
+        "Creates a new node holding a semver version.",
+        "Returns the version if the underlying data is a `Version`."
+    );
+    node_as!(
+        new_require,
+        as_require,
+        VersionReq,
+        "Creates a new node holding a version requirement.",
+        "Returns the version requirement if the underlying data is a `Require`."
+    );
+    node_as!(
+        new_list,
+        as_list,
+        Vec<Node>,
+        "Creates a new node holding a list of child nodes.",
+        "Returns the list of child nodes if the underlying data is a `List`."
+    );
     node_as!(new_table, as_table, BTreeMap<String, Node>, "Creates a new node holding a key-value table.", "Returns the table if the underlying data is a `Table`.");
-    node_field!(get_id, set_id, id, String, "Returns the definition id if the underlying data is a `Definition`.", "Sets the definition id if the underlying data is a `Definition`.");
-    node_field!(get_kind, set_kind, kind, String, "Returns the definition kind if the underlying data is a `Definition`.", "Sets the definition kind if the underlying data is a `Definition`.");
-    node_field!(get_name, set_name, name, String, "Returns the definition name if the underlying data is a `Definition`.", "Sets the definition name if the underlying data is a `Definition`.");
+    node_field!(
+        get_id,
+        set_id,
+        id,
+        String,
+        "Returns the definition id if the underlying data is a `Definition`.",
+        "Sets the definition id if the underlying data is a `Definition`."
+    );
+    node_field!(
+        get_kind,
+        set_kind,
+        kind,
+        String,
+        "Returns the definition kind if the underlying data is a `Definition`.",
+        "Sets the definition kind if the underlying data is a `Definition`."
+    );
+    node_field!(
+        get_name,
+        set_name,
+        name,
+        String,
+        "Returns the definition name if the underlying data is a `Definition`.",
+        "Sets the definition name if the underlying data is a `Definition`."
+    );
     node_field!(get_table, set_table, table, BTreeMap<String, Node>, "Returns the definition table if the underlying data is a `Definition`.", "Sets the definition table if the underlying data is a `Definition`.");
 
     /// Creates a new node holding a [`Data::Definition`] with the given id, kind, name, and table.

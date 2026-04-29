@@ -5,8 +5,7 @@ use edo_core::environment::{Command, EnvResult, Environment, EnvironmentImpl, Fa
 use edo_core::source::Source;
 use edo_core::storage::{Id, Storage};
 use edo_core::util::{
-    Reader, Writer, cmd_collect_out, cmd_noinput, cmd_noredirect, cmd_nulled, cmd_pipeout,
-    from_dash,
+    Reader, Writer, cmd_collect_out, cmd_noinput, cmd_noredirect, cmd_nulled, from_dash,
 };
 use snafu::ResultExt;
 use snafu::{OptionExt, ensure};
@@ -57,9 +56,7 @@ impl FromNode for ContainerFarm {
             .get("user")
             .and_then(|x| x.as_string())
             .unwrap_or("root".into());
-        let source_node = node
-            .get("source")
-            .context(error::NoSourceSnafu)?;
+        let source_node = node.get("source").context(error::NoSourceSnafu)?;
         let source = source_node
             .as_list()
             .and_then(|x| x.first().cloned())
@@ -530,7 +527,7 @@ pub mod error {
     use snafu::Snafu;
     use std::path::PathBuf;
 
-    use edo_core::{environment::error::EnvironmentError, plugin::error::PluginError};
+    use edo_core::{context::error::ContextError, environment::error::EnvironmentError};
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
@@ -585,9 +582,9 @@ pub mod error {
         }
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

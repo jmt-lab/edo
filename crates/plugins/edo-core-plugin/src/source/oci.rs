@@ -145,7 +145,7 @@ impl SourceImpl for ImageSource {
 pub mod error {
     use snafu::Snafu;
 
-    use edo_core::{plugin::error::PluginError, source::SourceError};
+    use edo_core::{context::error::ContextError, source::SourceError};
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
@@ -191,9 +191,9 @@ pub mod error {
         }
     }
 
-    impl From<ImageSourceError> for PluginError {
+    impl From<ImageSourceError> for ContextError {
         fn from(value: ImageSourceError) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

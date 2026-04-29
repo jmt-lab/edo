@@ -284,7 +284,6 @@ pub mod error {
 
     use edo_core::{
         context::{Addr, ContextError},
-        plugin::error::PluginError,
         transform::TransformError,
     };
 
@@ -314,9 +313,9 @@ pub mod error {
         }
     }
 
-    impl From<Error> for PluginError {
+    impl From<Error> for ContextError {
         fn from(value: Error) -> Self {
-            Self::Implementation {
+            Self::Component {
                 source: Box::new(value),
             }
         }

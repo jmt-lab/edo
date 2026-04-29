@@ -13,11 +13,6 @@ pub enum SourceError {
         source: Box<dyn snafu::Error + Send + Sync>,
     },
     #[snafu(transparent)]
-    Plugin {
-        #[snafu(source(from(crate::plugin::error::PluginError, Box::new)))]
-        source: Box<crate::plugin::error::PluginError>,
-    },
-    #[snafu(transparent)]
     Storage {
         #[snafu(source(from(crate::storage::StorageError, Box::new)))]
         source: Box<crate::storage::StorageError>,

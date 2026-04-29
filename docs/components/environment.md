@@ -44,8 +44,7 @@ source = ["//hello_oci/gcc"]
 # user    = "root"
 ```
 
-Anything else (e.g. a chroot/bubblewrap/remote farm) must currently ship as a
-wasm plugin — those kinds are not built in.
+Anything else (e.g. a chroot/bubblewrap/remote farm) is not built in.
 
 There is also a reserved auto-registered farm at `//default` that the CLI
 installs at startup (see `crates/edo/src/cmd/mod.rs`):
@@ -181,7 +180,7 @@ Key points:
 > There is **no** `NetworkAccess` enum or resource-limit struct in the current
 > core. Network and resource policy, if needed, are handled by the
 > implementation of a specific Farm (e.g. flags passed to the container CLI)
-> or left to plugin authors.
+> or left to future extensions.
 
 ### 3.3 Component Structure
 
@@ -282,19 +281,6 @@ See section 3.2.2. Grouped semantics:
    `shell` (drop user into interactive shell — used by
    `Transform::shell(env)` for debugging when `can_shell()` is true).
 
-### 4.3 WebAssembly Plugin Interface (WIT)
-
-Environment and Farm both cross the guest/host boundary as WIT resources.
-Canonical definitions live in `crates/edo-wit/{host.wit,abi.wit}`. The guest
-exports a `farm` resource with `setup` + `create` factory methods and an
-`environment` resource mirroring the trait above; the host exposes
-`command` as a first-class resource (obtained via `environment.defer-cmd(log,
-id)`) with `chdir`/`pushd`/`popd`/`create-dir`/`copy`/`run`/`send`/…
-
-Authoring a plugin farm typically means implementing `abi::GuestFarm` and
-`abi::GuestEnvironment` from `edo-plugin-sdk`, defaulting the rest via
-`stub::Stub`.
-
 ## 5. Implementation Details
 
 ### 5.1 Registration flow
@@ -346,7 +332,7 @@ Source: `crates/plugins/edo-core-plugin/src/environment/container.rs`.
 Network policy, privileges, volume mounts beyond the workdir, seccomp/LSM
 profiles, and resource limits are **not** currently surfaced in the TOML
 schema. They would need to be added either to `ContainerConfig` or delegated
-to a third-party farm plugin.
+to a third-party extension.
 
 ### 5.4 Note on sandboxing backends
 
@@ -365,7 +351,7 @@ trait surface: isolation is whatever the chosen Farm provides.
 - `ContainerFarm`: isolation is whatever the container runtime gives you by
   default (namespaces, cgroups). There is no TOML-level knob yet for network
   mode, read-only mounts, seccomp, user namespaces, or resource caps. Anyone
-  needing those today must ship a plugin farm.
+  needing those today will find they are not currently available.
 
 Planned enhancements — network ACLs, resource limits, user-namespace
 remapping, seccomp/AppArmor/SELinux profiles — are listed under Future
@@ -398,8 +384,7 @@ and `Run` (a `Command::send` whose underlying `run` returned `false`).
    using both `local` and `container` farms.
 3. **Container tests** — at least one runtime (podman/finch/docker) must be
    installed; auto-detection via `which` decides which is exercised.
-4. **Plugin tests** — host↔guest parity for the `farm` and `environment`
-   WIT resources, including the `command` resource.
+4. **Command tests** — parity checks for the `command` resource.
 
 ## 9. Future Enhancements
 
@@ -428,7 +413,7 @@ The Environment component gives Edo pluggable control over where transforms
 execute. Its contract is intentionally small — a `Farm` factory plus a
 lifecycle-oriented `Environment` trait with a deferred `Command` builder —
 which keeps the `Context` + `Scheduler` wiring uniform across host, container,
-and future plugin-supplied backends. Today those backends are limited to the
-builtin `local` and `container` farms plus any wasm plugins you load;
+and future backends. Today those backends are limited to the
+builtin `local` and `container` farms;
 richer isolation and policy live in the Future Enhancements list rather
 than in the current code.

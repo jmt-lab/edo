@@ -12,7 +12,7 @@ design of Edo, expanding on the four core abstractions that shape every build:
 Designed for software developers building applications for platforms like
 Flatpak and Snap, as well as OS builders like Bottlerocket, Edo provides
 precise control over where and how builds execute while supporting extensibility
-through WebAssembly Component Model plugins. This architecture enables the
+through its modular architecture. This architecture enables the
 creation of portable binaries with specific compatibility requirements — for
 example, targeting a particular GLIBC version — which has been a pain point in
 existing build tools.
@@ -41,11 +41,10 @@ Edo addresses these limitations through:
 
 1. **Separation of Concerns**: Clear boundaries between build definition,
    environment specification, and execution mechanisms.
-2. **Extensibility First**: WebAssembly Component Model plugin system for
-   customizing any of the four core abstractions.
+2. **Extensibility First**: Modular architecture for customizing any of the
+   four core abstractions.
 3. **Environment Flexibility**: Support for multiple execution environments
-   (local, container, plugin-supplied) without being tied to a specific
-   isolation technology.
+   (local, container) without being tied to a specific isolation technology.
 4. **Artifact-centric Design**: OCI-style artifact model (Blake3-hashed layers
    with media types) that enables consistent handling across local and remote
    storage backends.
@@ -56,25 +55,20 @@ Edo addresses these limitations through:
 
 Edo is organized around four pluggable abstractions — **Storage**, **Source**,
 **Environment**, **Transform** — coordinated by a `Context` (the shared build
-session) and executed by a `Scheduler` (the DAG worker pool). Extensibility is
-delivered through a `Plugin` registry that can host both an in-process builtin
-plugin (`edo-core-plugin`) and WebAssembly component plugins loaded via
-`wasmtime`.
+session) and executed by a `Scheduler` (the DAG worker pool). The builtin
+implementations are provided by `edo-core-plugin`.
 
 ```mermaid
 graph TB
     User[User / CI] --> CLI["edo CLI<br/>crates/edo"]
     CLI --> Ctx["Context<br/>edo-core::context"]
     Ctx --> Sched["Scheduler<br/>DAG executor"]
-    Ctx --> Plugins[Plugin registry]
+    Ctx --> CorePlugin["edo-core-plugin<br/>builtin"]
     Ctx --> Storage["Storage<br/>local + source/build/output caches"]
     Ctx --> Farms[Environment Farms]
     Ctx --> Sources[Sources + Vendors]
     Ctx --> Transforms[Transforms]
     Ctx --> Schema["edo.toml loader<br/>Schema::V1"]
-
-    Plugins -->|in-process| CorePlugin["edo-core-plugin<br/>builtin"]
-    Plugins -->|wasmtime| Wasm["WasmPlugin<br/>*.wasm components"]
 
     Sched --> Transforms
     Transforms --> Farms
@@ -88,8 +82,8 @@ There is no single "build engine" struct. The responsibilities traditionally
 assigned to one are split cleanly:
 
 - `Context` (`crates/edo-core/src/context/mod.rs`) owns configuration, the
-  storage composite, the plugin / farm / source / transform / vendor
-  registries, the `LogManager`, and the lock file.
+  storage composite, the farm / source / transform / vendor registries, the
+  `LogManager`, and the lock file.
 - `Scheduler` (`crates/edo-core/src/scheduler/mod.rs`) owns DAG construction
   and parallel execution with a configurable worker pool.
 
@@ -97,8 +91,8 @@ assigned to one are split cleanly:
 
 All four core abstractions are declared with the `arc_handle` macro. Callers
 implement a `*Impl` trait, wrap it with `Trait::new(impl)`, and receive a
-`Clone + Send + Sync` handle. The same handle type is used whether the
-implementation lives in-process or behind the wasm boundary.
+`Clone + Send + Sync` handle. The same handle type is used for any
+implementation.
 
 #### 3.2.1 Context & Scheduler
 
@@ -131,8 +125,7 @@ Storage is a composite facade over one or more `Backend` implementations:
 - `//edo-build-cache` — optional remote cache for build outputs.
 - `//edo-output-cache` — optional remote cache for final outputs.
 
-The only builtin non-local backend is `s3`. Additional backends can be supplied
-by wasm plugins.
+The only builtin non-local backend is `s3`.
 
 **Architectural elements**:
 
@@ -187,7 +180,7 @@ don't explicitly specify `environment = "//..."` fall through to the host.
 
 `Environment::defer_cmd(log, id)` produces a `Command` builder — a scriptable,
 deferred sequence of operations (`chdir`, `pushd/popd`, `create-dir`, `copy`,
-`run`, `send`, …) used heavily by plugin-authored transforms.
+`run`, `send`, …) used heavily by transforms.
 
 #### 3.2.5 Transform
 
@@ -213,71 +206,15 @@ are:
 - `script` — run Handlebars-templated shell commands (`{{install-root}}`,
   `{{build-root}}`, and `--arg` values).
 
-### 3.3 Plugin System
-
-Plugins expose the same four abstractions as native traits, but across a
-WebAssembly Component Model boundary. Plugin authors write guest code against
-the `edo:plugin@1.0.0` WIT package; Edo loads the resulting component with
-`wasmtime`.
-
-**Key pieces**:
-
-- **WIT package** — `crates/edo-wit/` (note: not a Cargo crate, pure `.wit`):
-  - `edo.wit` — `world edo { import host; export abi; }`
-  - `host.wit` — host-provided resources (`storage`, `log`, `command`,
-    `environment`, `artifact`, `node`, `context`, `reader`/`writer`, …).
-  - `abi.wit` — guest exports: resources `backend`, `environment`, `farm`,
-    `source`, `transform`, `vendor`, plus `create-*` factories and a
-    `supports(component, kind) -> bool` predicate.
-- **Host runtime** — `crates/edo-core/src/plugin/`. `bindings.rs` is the
-  `wasmtime::component::bindgen!` output. Adapters under `impl_/` make each
-  guest resource look like a native `edo-core` trait implementation.
-- **Guest SDK** — `crates/edo-plugin-sdk/` re-exports `wit-bindgen` output and
-  supplies `Stub`, a default implementation of every `Guest*` trait that
-  returns `NotImplemented`, so plugin authors only implement what they need.
-- **In-process builtin** — `crates/plugins/edo-core-plugin/` implements the
-  host-side `PluginImpl` trait directly (no wasm) and ships every builtin
-  kind listed above.
-
-**Plugin sourcing and versioning**:
-
-- `[plugin.<name>]` tables reuse the same source-resolution machinery as
-  `[source.*]`: the `source` field inside a plugin table is materialised
-  through a `Source` (typically `remote`, `git`, or `local`) so plugin
-  artifacts participate in the standard caching, content-addressing, and
-  lock-file flows.
-- The WIT package name `edo:plugin@1.0.0` is the compatibility contract.
-  Host and guest must agree on the world version; `wasmtime::component`
-  linking rejects mismatched component types at load time, providing the
-  plugin-versioning guarantee.
-
-```mermaid
-sequenceDiagram
-    participant Ctx as Context
-    participant Plugin as WasmPlugin
-    participant Wasmtime as wasmtime runtime
-    participant Guest as Guest .wasm
-    Ctx->>Plugin: create_transform(addr, node, ctx)
-    Plugin->>Wasmtime: call abi.create-transform(...)
-    Wasmtime->>Guest: invoke export
-    Guest-->>Wasmtime: transform resource handle
-    Wasmtime-->>Plugin: Resource<Transform>
-    Plugin-->>Ctx: Transform (PluginTransform adapter)
-    Ctx->>Plugin: transform.get_unique_id(handle)
-    Plugin->>Wasmtime: call on guest resource
-    Wasmtime->>Guest: resource method
-    Note over Guest,Wasmtime: Guest may call back into host<br/>(storage, log, command builder, ...)
-```
-
-### 3.4 Build Configuration
+### 3.3 Build Configuration
 
 Edo is configured through `edo.toml` files. The top-level key `schema-version`
 dispatches to a schema loader; currently only `"1"` (`Schema::V1`) is
 implemented (see `crates/edo-core/src/context/schema.rs`).
 
 Every TOML table under `[source.*]`, `[transform.*]`, `[environment.*]`,
-`[vendor.*]`, `[requires.*]`, `[plugin.*]`, and `[cache.*]` becomes a `Node`
-registered under a hierarchical `Addr` such as `//<project>/<name>`.
+`[vendor.*]`, `[requires.*]`, and `[cache.*]` becomes a `Node` registered
+under a hierarchical `Addr` such as `//<project>/<name>`.
 
 Example — `examples/hello_rust/edo.toml`:
 
@@ -353,7 +290,7 @@ Templating in `ScriptTransform.commands` is performed with Handlebars; the
 standard variables are `{{install-root}}`, `{{build-root}}`, and any values
 passed on the CLI via `--arg KEY=VALUE`.
 
-### 3.5 CLI Surface
+### 3.4 CLI Surface
 
 Binary: `edo`. Defined in `crates/edo/src/main.rs`.
 
@@ -374,7 +311,7 @@ Subcommands:
   list                                          List transforms / addresses
 ```
 
-### 3.6 Addressing
+### 3.5 Addressing
 
 Everything registered in a `Context` is keyed by an `Addr` parsed via
 `Addr::parse`:
@@ -383,7 +320,6 @@ Everything registered in a `Context` is keyed by an `Addr` parsed via
 - `//default` — the default local farm auto-registered by the CLI.
 - `//edo-local-cache`, `//edo-source-cache/<name>`, `//edo-build-cache`,
   `//edo-output-cache` — reserved storage slots.
-- `edo` (bare) — the preloaded builtin plugin.
 
 ## 4. Implementation Strategy
 
@@ -394,8 +330,7 @@ implementation follows these principles:
 
 1. **Handle-based ownership** — every trait is exposed through an
    `arc_handle`-generated newtype over `Arc<dyn Trait>`, so passing
-   abstractions around is cheap regardless of whether they live in-process or
-   behind wasm.
+   abstractions around is cheap.
 2. **Typed errors** — every subsystem defines a `snafu` error enum. The CLI's
    `main` uses `#[snafu::report]` for formatted diagnostics, and subsystems
    bubble errors with `#[snafu(transparent)]` variants.
@@ -405,25 +340,15 @@ implementation follows these principles:
 4. **Testing and linting** — `cargo-deny` enforces license / advisory / ban
    policy via `deny.toml` at the repository root.
 
-### 4.2 WebAssembly Integration
-
-The plugin system is built on:
-
-1. **wasmtime** (host) — component runtime and `component::bindgen!` macro.
-2. **wit-bindgen** (guest) — consumed through `edo-plugin-sdk`.
-3. **WebAssembly Component Model** — the `edo:plugin@1.0.0` world is defined
-   once in `crates/edo-wit/*.wit` and shared by host and guest.
-
-### 4.3 Build Phases
+### 4.2 Build Phases
 
 A typical `edo run <addr>` proceeds through:
 
 1. **Configuration loading** — parse `edo.toml` (`Schema::V1`), construct
    `Config` / `Storage` / `Scheduler`.
-2. **Plugin discovery** — register the builtin `edo-core-plugin` and load any
-   `[plugin.*]` wasm components.
+2. **Plugin registration** — register the builtin `edo-core-plugin`.
 3. **Project loading** — iterate `[source]`, `[transform]`, `[environment]`,
-   `[vendor]`, `[requires]`; dispatch each `Node` to the owning plugin.
+   `[vendor]`, `[requires]`; dispatch each `Node` to the builtin plugin.
 4. **Dependency resolution** — if locked, trust `edo.lock.json`; otherwise
    invoke `resolvo` through registered vendors.
 5. **Graph construction** — walk `Transform::depends` from the requested root.
@@ -435,15 +360,14 @@ A typical `edo run <addr>` proceeds through:
 8. **Artifact storage** — `Success(artifact)` outputs are saved to local
    storage and optionally mirrored to build / output caches.
 
-### 4.4 Development Approach
+### 4.3 Development Approach
 
 Development proceeds in phases:
 
 1. **Foundation** — core traits, in-process core plugin, TOML schema v1.
-2. **Plugin surface** — WIT contract, wasmtime host adapters, guest SDK.
-3. **Builtin breadth** — additional source / environment / vendor kinds.
-4. **Distributed caching** — filling out the build / output cache story.
-5. **Remote execution & IDE/CI integrations** — see §6 Future Considerations.
+2. **Builtin breadth** — additional source / environment / vendor kinds.
+3. **Distributed caching** — filling out the build / output cache story.
+4. **Remote execution & IDE/CI integrations** — see §6 Future Considerations.
 
 ## 5. Operational Considerations
 
@@ -460,8 +384,6 @@ Development proceeds in phases:
 
 ### 5.2 Security Model
 
-- **Plugin sandboxing** — wasm guests run inside `wasmtime`; the host grants
-  explicit capabilities through WIT-exposed resources.
 - **Content addressing** — every artifact and source is identified by a
   Blake3-based `Id`. The storage layer validates computed digests against
   the expected `Id` on both save (write) and open (read) paths; mismatches
@@ -484,7 +406,7 @@ Development proceeds in phases:
 ### 5.4 Scaling Strategy
 
 - **Distributed caching** — `s3` backends already participate as source /
-  build / output caches; further backends can ship as plugins.
+  build / output caches.
 - **Selective building** — `edo run <addr>` only builds the transitive
   closure of the requested target; `edo checkout` extracts without rebuild
   when the artifact is already cached.
@@ -498,10 +420,10 @@ Development proceeds in phases:
 
 1. Fixed environment types with no extensibility.
 2. A dedicated environment DSL.
-3. A plugin-based approach with a small set of builtins.
+3. A modular approach with a small set of builtins.
 
-**Decision**: Plugin-based. Ships with `local` and `container` builtin farms,
-while leaving the door open for plugin-supplied environments.
+**Decision**: Modular approach. Ships with `local` and `container` builtin
+farms, with room for future extension.
 
 ### 6.2 Artifact Storage
 
@@ -525,9 +447,9 @@ This preserves ecosystem compatibility (tar layers can be unpacked by
 
 **Decision**: TOML, surfaced through a versioned schema (`schema-version =
 "1"`). This keeps project manifests declarative and easy to lint, while the
-underlying `Node` model allows plugins to interpret their own sections freely.
+underlying `Node` model is flexible enough to support future extensions.
 Anything that would benefit from scripted configuration is instead expressed
-as a transform (e.g. Handlebars-templated `script` commands) or as a plugin.
+as a transform (e.g. Handlebars-templated `script` commands).
 
 ## 7. Success Metrics
 
@@ -535,8 +457,8 @@ The success of Edo is measured by:
 
 1. **Build performance** — wall-clock improvements over existing tools on
    representative workloads.
-2. **Flexibility** — ability to target diverse environments (host, container,
-   plugin-supplied) from a single manifest.
+2. **Flexibility** — ability to target diverse environments (host, container)
+   from a single manifest.
 3. **Reproducibility** — identical `Id`s across machines for identical inputs.
 4. **Adoption** — use by target audiences (Flatpak / Snap application
    developers, OS builders such as Bottlerocket).

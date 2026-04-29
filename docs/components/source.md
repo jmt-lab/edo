@@ -100,7 +100,7 @@ pub trait Vendor {
 
     /// Materialise a concrete source-kind `Node` for `(name, version)`.
     /// The returned `Node` is fed back through `CorePlugin::create_source`
-    /// (or a wasm plugin) to produce an actual `Source` handle.
+    /// to produce an actual `Source` handle.
     async fn resolve(&self, name: &str, version: &Version) -> SourceResult<Node>;
 
     /// Transitive dependency requirements for `(name, version)`.
@@ -275,46 +275,9 @@ repeating because they are easy to miss:
   `arc_handle`-generated `Source` handle. Implementers write `impl SourceImpl
 for MySource` and call `Source::new(MySource { ... })`.
 - `Source::cache` is an **inherent** method on the handle, not part of the
-  trait. Guest (wasm) source implementations do not override it — they only
-  supply `get_unique_id` / `fetch` / `stage`, and the host wraps them so
-  that `cache` is still available to callers.
+  trait. Implementers only supply `get_unique_id` / `fetch` / `stage`;
+  `cache` is always available to callers on the handle.
 - `Vendor` methods return `SourceResult`, not a separate `VendorResult`.
-
-### 4.3 WebAssembly Plugin Interface (WIT)
-
-The plugin contract lives in `crates/edo-wit/` (not a Cargo crate — a raw
-WIT package `edo:plugin@1.0.0`). The source- and vendor-related portions of
-`abi.wit` expose resources rather than flat functions:
-
-```wit
-// abi.wit (abridged — see crates/edo-wit/abi.wit for the authoritative text)
-resource source {
-    get-unique-id: func() -> result<id, error>;
-    fetch:         func(log: borrow<log>, storage: borrow<storage>)
-                   -> result<artifact, error>;
-    stage:         func(log: borrow<log>, storage: borrow<storage>,
-                        env: borrow<environment>, path: string)
-                   -> result<_, error>;
-}
-
-resource vendor {
-    get-options:      func(name: string)
-                      -> result<list<string>, error>;      // versions as strings
-    resolve:          func(name: string, version: string)
-                      -> result<node, error>;
-    get-dependencies: func(name: string, version: string)
-                      -> result<option<list<tuple<string, string>>>, error>;
-}
-
-create-source: func(addr: string, node: borrow<node>) -> result<source, error>;
-create-vendor: func(addr: string, node: borrow<node>) -> result<vendor, error>;
-supports:      func(component: component, kind: string) -> bool;
-```
-
-`component` is an enum with `storage-backend | environment | source |
-transform | vendor`. Host-side adapters in
-`crates/edo-core/src/plugin/impl_/source.rs` and `vendor.rs` wrap these
-resources back into the native `Source` / `Vendor` handles.
 
 ## 5. Implementation Details
 
@@ -368,7 +331,7 @@ to:
   as transitive `VersionReq`s.
 
 Anything beyond OCI (npm, cargo, rpm, deb, …) currently requires a
-third-party WebAssembly plugin implementing the `vendor` WIT resource.
+third-party implementation.
 There are no built-in npm/rpm vendors — earlier drafts of this document
 listed those as examples and should be treated as **planned / aspirational**.
 
@@ -458,11 +421,10 @@ throughout `edo-core`.
 
 ### 8.3 Extensibility
 
-- Additional source kinds ship as in-process additions to
-  `edo-core-plugin` or as out-of-process WebAssembly plugins authored
-  against `edo-plugin-sdk`.
-- `Vendor` plugins only need to satisfy the three async methods on the
-  `vendor` WIT resource to plug into the resolver.
+- Additional source kinds can be added as in-process additions to
+  `edo-core-plugin`.
+- Vendor implementations need to satisfy the three async methods on the
+  `Vendor` trait to plug into the resolver.
 
 ## 9. Testing Strategy
 
@@ -483,9 +445,9 @@ throughout `edo-core`.
 
 1. **Signed sources** — verify OCI cosign signatures or detached
    signatures on `RemoteSource`.
-2. **Additional built-in vendors** — npm, cargo, deb/rpm, maven. Currently
-   these require third-party wasm plugins; they are listed here only as
-   aspirational targets.
+2. **Additional built-in vendors** — npm, cargo, deb/rpm, maven. These
+   are not currently implemented; they are listed here only as aspirational
+   targets.
 3. **Delta / resumable downloads** for `RemoteSource`.
 4. **Patch application** between fetch and stage.
 5. **Mirror selection** with latency-based fallback.

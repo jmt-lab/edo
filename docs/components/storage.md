@@ -15,7 +15,7 @@ The Storage component is responsible for:
 3. **Cache Management**: Handling both local and remote artifact caches, split into four roles (local / source / build / output)
 4. **Artifact Organization**: Maintaining a structured representation of artifacts via the per-backend `Catalog`
 5. **Integrity Verification**: Validating artifact integrity through Blake3 digests on layer content
-6. **Storage Backend Abstraction**: Providing a consistent interface across different storage backends, including wasm plugin backends
+6. **Storage Backend Abstraction**: Providing a consistent interface across different storage backends
 
 ## 3. Component Architecture
 
@@ -59,7 +59,7 @@ pub struct Layer {
 }
 ```
 
-> Naming note: the Rust type is literally named `Config` inside the `storage` module. The knowledge-base summary and the WIT contract both refer to it as `ArtifactConfig` / `artifact-config` to disambiguate it from the user-configuration `Config` elsewhere in `edo-core`. They are the same concept.
+> Naming note: the Rust type is literally named `Config` inside the `storage` module. Other documentation may refer to it as `ArtifactConfig` to disambiguate it from the user-configuration `Config` elsewhere in `edo-core`. They are the same concept.
 
 Key characteristics:
 
@@ -185,7 +185,7 @@ A `Backend` is an `arc_handle`-wrapped trait abstraction for the actual storage 
 | `LocalBackend` | `crates/edo-core/src/storage/local.rs`           | Always used for the local cache; auto-registered by the CLI at `//edo-local-cache`. |
 | `S3Backend`    | `crates/plugins/edo-core-plugin/src/storage/s3/` | Selected via `kind = "s3"` in a `[cache.*]` TOML table.                             |
 
-Anything else would have to be provided by a **wasm plugin** (`crates/edo-core/src/plugin/impl_/backend.rs` adapts `storage-backend` guest resources onto the `Backend` trait).
+Additional backends can be added by implementing the `Backend` trait.
 
 ### 3.2 Component Structure
 
@@ -399,69 +399,9 @@ pub trait Backend {
 }
 ```
 
-### 4.3 WebAssembly Plugin Interface (WIT)
-
-The storage surface crosses the wasm boundary through a set of resources defined in `crates/edo-wit/host.wit` (interface `host`). Guest plugins consume it via `wit-bindgen`; the host binds it via `wasmtime::component::bindgen!`. The contract is not a standalone `edo:storage` package — it is part of the single `edo:host` world.
-
-Relevant excerpts from `host.wit`:
-
-```wit
-resource id {
-    constructor(name: string, digest: string,
-                version: option<string>, pkg: option<string>, arch: option<string>);
-    name: func() -> string;
-    digest: func() -> string;
-    set-digest: func(digest: string);
-    version: func() -> option<string>;
-    set-version: func(input: string);
-    clear-version: func();
-    pkg: func() -> option<string>;
-    arch: func() -> option<string>;
-    from-string: static func(input: string) -> id;
-}
-
-resource layer {
-    media-type: func() -> string;
-    digest: func() -> string;
-    size: func() -> u64;
-    platform: func() -> option<string>;
-}
-
-resource artifact-config {
-    constructor(id: borrow<id>, provides: list<string>, metadata: option<string>);
-    id: func() -> id;
-    provides: func() -> list<string>;
-    requires: func() -> list<tuple<string, list<tuple<string, string>>>>;
-    add-requirement: func(group: string, name: string, version: string);
-}
-
-resource artifact {
-    constructor(config: borrow<artifact-config>);
-    config: func() -> artifact-config;
-    layers: func() -> list<layer>;
-    add-layer: func(layer: borrow<layer>);
-}
-
-resource storage {
-    open: func(id: borrow<id>) -> result<artifact, error>;
-    read: func(layer: borrow<layer>) -> result<reader, error>;
-    start-layer: func() -> result<writer, error>;
-    finish-layer: func(media-type: string, platform: option<string>,
-                       writer: borrow<writer>) -> result<layer, error>;
-    save: func(artifact: borrow<artifact>) -> result<_, error>;
-}
-```
-
-Things to note about the WIT surface vs the native `Backend` trait:
-
-- Guests see a single `storage` resource (the composite), not per-backend `Backend` methods. The host adapts calls into the active composite.
-- Guest-authored **backends** are registered by implementing the `storage-backend` component variant listed in the `component` enum and exporting the guest-side bindings from `edo-plugin-sdk` (see `crates/edo-core/src/plugin/impl_/backend.rs` for the host-side adapter).
-- `media-type` crosses the boundary as a `string` and is parsed back into `MediaType` host-side.
-- `platform` crosses as an optional string and is converted through `ocilot::models::Platform`.
-
 ## 5. Configuration (TOML)
 
-Storage backends are declared in the project's `edo.toml` under the `[cache.*]` tables. Only `kind` is dispatched by the plugin registry; remaining keys are backend-specific.
+Storage backends are declared in the project's `edo.toml` under the `[cache.*]` tables. The `kind` field determines which backend implementation to use; remaining keys are backend-specific.
 
 ```toml
 schema-version = "1"
@@ -493,7 +433,7 @@ The schema loader lives at `crates/edo-core/src/context/schema.rs`:
 The CLI (`crates/edo/src/cmd/mod.rs::create_context`) converts these nodes into `Backend` handles and wires them onto the `Storage` composite at the reserved addresses below.
 
 **Supported builtin cache `kind`s:** `s3`.
-Anything else must be supplied by a wasm plugin that declares a `storage-backend` component.
+Additional backends can be added by implementing the `Backend` trait.
 
 ## 6. Reserved Addresses
 
@@ -545,7 +485,7 @@ Defined in `crates/plugins/edo-core-plugin/src/storage/s3/`. An OCI-layer-aware,
 
 ### 7.3 Other Remote Backends
 
-Not built in today. A wasm plugin can register additional `kind`s by exporting a `storage-backend` component (via `edo-plugin-sdk`). An HTTP-only pull-through cache, a registry-style cache, etc. would all live there rather than in core.
+Not built in today. Additional backends (HTTP pull-through cache, registry-style cache, etc.) could be added by implementing the `Backend` trait.
 
 ## 8. Artifact Cache Management
 
@@ -724,7 +664,7 @@ Storage testing focuses on:
 ## 13. Future Enhancements (aspirational — not implemented)
 
 1. **Public `upload_output`** on `Storage` — wire `Inner::upload_output` to a public method so the CLI can publish transform results.
-2. **Additional builtin backends** — e.g. HTTP pull-through, registry-backed. Currently expected to live in wasm plugins rather than `edo-core-plugin`.
+2. **Additional builtin backends** — e.g. HTTP pull-through, registry-backed. Could be added as additional implementations of the `Backend` trait.
 3. **Distributed Cache**: multi-node artifact caching.
 4. **Tiered Storage**: hierarchical storage management.
 5. **Pluggable Compression Algorithms** beyond the current fixed `Compression` enum.

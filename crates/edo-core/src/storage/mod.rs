@@ -242,14 +242,15 @@ impl Inner {
 
         // Check if we have registered a build cache and it has this artifact
         if let Some(build) = self.build.as_ref()
-            && build.has(id).await? {
-                let artifact = build.open(id).await?;
-                if sync {
-                    self.download(&artifact, build).await?;
-                }
-                // Otherwise open it direct from the build cache
-                return Ok(Some(artifact));
+            && build.has(id).await?
+        {
+            let artifact = build.open(id).await?;
+            if sync {
+                self.download(&artifact, build).await?;
             }
+            // Otherwise open it direct from the build cache
+            return Ok(Some(artifact));
+        }
         // None found
         Ok(None)
     }
