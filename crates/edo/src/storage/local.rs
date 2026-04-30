@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::context::{Addr, Config, FromNodeNoContext, Node};
 use crate::non_configurable_no_context;
-use crate::storage::{Artifact, BackendImpl, Id, Layer, LayerBuilder, MediaType, StorageResult};
+use crate::storage::{Artifact, BackendImpl, Id, Layer, MediaType, StorageResult};
 use crate::util::{Reader, Writer};
 use async_trait::async_trait;
 use ocilot::models::Platform;
@@ -249,13 +249,12 @@ impl BackendImpl for LocalBackend {
         // Now we want to calculate the digest
         let digest = writer.finish().await;
         let target_path = self.layer_dir.join(digest.clone());
-        let layer = LayerBuilder::default()
+        let layer = Layer::builder()
             .digest(digest.clone())
             .media_type(media_type.clone())
             .size(writer.size())
-            .platform(platform)
-            .build()
-            .context(error::LayerSnafu)?;
+            .maybe_platform(platform)
+            .build();
 
         // Copy the layer to the appropriate place
         if tmp_path != target_path {
@@ -273,7 +272,7 @@ impl BackendImpl for LocalBackend {
 pub(crate) mod error {
     use snafu::Snafu;
 
-    use crate::storage::{LayerBuilderError, StorageError};
+    use crate::storage::StorageError;
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub(crate)))]
@@ -284,8 +283,6 @@ pub(crate) mod error {
         Copy { source: std::io::Error },
         #[snafu(display("failed to create temporary file for new layer: {source}"))]
         Create { source: std::io::Error },
-        #[snafu(display("failed to make a layer: {source}"))]
-        Layer { source: LayerBuilderError },
         #[snafu(display("cannot save an artifact that is missing a layer with digest '{digest}'"))]
         LayerMissing { digest: String },
         #[snafu(display("failed to create new local storage backend: {source}"))]

@@ -8,9 +8,7 @@ use std::path::Path;
 use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType, Storage,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 
 /// A OCI Image source is used to fetch
 /// an oci image to use as a container image
@@ -67,12 +65,10 @@ non_configurable!(ImageSource, error::ImageSourceError);
 #[async_trait]
 impl SourceImpl for ImageSource {
     async fn get_unique_id(&self) -> SourceResult<Id> {
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(self.uri.to_string())
             .digest(self.digest.clone())
-            .version(None)
-            .build()
-            .context(error::IdSnafu)?;
+            .build();
         trace!(component = "source", type = "oci", "calculated id to be {id}");
         Ok(id)
     }
@@ -100,17 +96,15 @@ impl SourceImpl for ImageSource {
         );
 
         // We use ocilot to create a oci tarball for this imag
-        let mut artifact = ArtifactBuilder::default()
+        let mut artifact = Artifact::builder()
             .config(
-                ConfigBuilder::default()
+                Config::builder()
                     .id(id)
                     .provides(BTreeSet::from_iter([self.uri.to_string()]))
-                    .build()
-                    .context(error::ConfigSnafu)?,
+                    .build(),
             )
             .media_type(MediaType::Manifest)
-            .build()
-            .context(error::ArtifactSnafu)?;
+            .build();
 
         let writer = storage.safe_start_layer().await?;
         index
@@ -150,14 +144,6 @@ pub mod error {
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
     pub enum ImageSourceError {
-        #[snafu(display("failed to make artifact manifest: {source}"))]
-        Artifact {
-            source: edo::storage::ArtifactBuilderError,
-        },
-        #[snafu(display("failed to make artifact config: {source}"))]
-        Config {
-            source: edo::storage::ConfigBuilderError,
-        },
         #[snafu(transparent)]
         Context {
             #[snafu(source(from(edo::context::ContextError, Box::new)))]
@@ -169,18 +155,12 @@ pub mod error {
         Oci { source: ocilot::error::Error },
         #[snafu(display("image source definition requires a field '{field}' with type '{type_}"))]
         Field { field: String, type_: String },
-        #[snafu(display("failed to make id: {source}"))]
-        Id {
-            source: edo::storage::IdBuilderError,
-        },
         #[snafu(display("io error occured in image source: {source}"))]
         Io { source: std::io::Error },
         #[snafu(display("failed to serialize image configuration: {source}"))]
         Serialize { source: serde_json::Error },
         #[snafu(transparent)]
-        Storage {
-            source: edo::storage::StorageError,
-        },
+        Storage { source: edo::storage::StorageError },
     }
 
     impl From<ImageSourceError> for SourceError {

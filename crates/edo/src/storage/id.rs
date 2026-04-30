@@ -1,5 +1,5 @@
 use super::error;
-use derive_builder::Builder;
+use bon::Builder;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -54,14 +54,14 @@ impl fmt::Display for Name {
 /// secondary name called the package name, along with an optional version.
 /// All ids contain a blake3 digest
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Builder)]
-#[builder(setter(into))]
 pub struct Id {
+    #[builder(into)]
     name: Name,
-    #[builder(setter(into), default)]
+    #[builder(into)]
     package: Option<Name>,
-    #[builder(setter(into), default)]
+    #[builder(into)]
     version: Option<Version>,
-    #[builder(setter(into), default)]
+    #[builder(into)]
     arch: Option<String>,
     digest: String,
 }

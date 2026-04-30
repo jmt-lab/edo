@@ -1,13 +1,11 @@
 use snafu::Snafu;
 use tokio::{sync::mpsc::error::SendError, task::JoinError};
 
-use crate::{context::Addr, storage::IdBuilderError};
+use crate::context::Addr;
 
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub))]
 pub enum SchedulerError {
-    #[snafu(display("failed to recreate artifact id: {source}"))]
-    IdBuild { source: IdBuilderError },
     #[snafu(transparent)]
     Cache {
         source: crate::storage::StorageError,

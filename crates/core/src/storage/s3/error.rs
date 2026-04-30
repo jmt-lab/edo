@@ -1,5 +1,4 @@
 use aws_sdk_s3::error::SdkError;
-use edo::storage::LayerBuilderError;
 use edo::storage::StorageError;
 use snafu::Snafu;
 
@@ -32,8 +31,6 @@ pub enum Error {
     Get {
         source: SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
     },
-    #[snafu(display("failed to make a layer: {source}"))]
-    Layer { source: LayerBuilderError },
     #[snafu(display("cannot save an artifact that is missing a layer with digest '{digest}'"))]
     LayerMissing { digest: String },
     #[snafu(display("failed to list objects in bucket: {source}"))]

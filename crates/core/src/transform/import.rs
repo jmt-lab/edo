@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use edo::context::{Addr, Context, FromNode, Handle, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::Source;
-use edo::storage::{ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType};
 use edo::transform::{TransformImpl, TransformResult, TransformStatus};
 use indexmap::IndexMap;
 use std::path::Path;
@@ -44,7 +44,7 @@ impl TransformImpl for ImportTransform {
         }
         let hash_bytes = hash.finalize();
         let digest = base16::encode_lower(hash_bytes.as_bytes());
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(
                 self.addr
                     .to_string()
@@ -53,9 +53,7 @@ impl TransformImpl for ImportTransform {
                     .to_string(),
             )
             .digest(digest)
-            .version(None)
-            .build()
-            .unwrap();
+            .build();
         trace!(component = "transform", type = "import", "calculated id to be {id}");
         Ok(id)
     }
@@ -91,11 +89,10 @@ impl TransformImpl for ImportTransform {
         // Transform is simply as we just archive the output directory
         match async move {
             let id = self.get_unique_id(ctx).await?;
-            let mut artifact = ArtifactBuilder::default()
-                .config(ConfigBuilder::default().id(id.clone()).build().unwrap())
+            let mut artifact = Artifact::builder()
+                .config(Config::builder().id(id.clone()).build())
                 .media_type(MediaType::Manifest)
-                .build()
-                .unwrap();
+                .build();
             let writer = ctx.storage().safe_start_layer().await?;
             env.read(Path::new("output"), writer.clone()).await?;
             artifact.layers_mut().push(

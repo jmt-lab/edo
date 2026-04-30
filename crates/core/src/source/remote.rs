@@ -11,10 +11,7 @@ use url::Url;
 use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
-use edo::storage::ConfigBuilder;
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, Id, IdBuilder, MediaType, Storage,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 
 /// A RemoteSource is rather simple
 /// it is responsible for fetching a remote file and storing it as an
@@ -78,12 +75,10 @@ non_configurable!(RemoteSource, error::RemoteSourceError);
 #[async_trait]
 impl SourceImpl for RemoteSource {
     async fn get_unique_id(&self) -> SourceResult<Id> {
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(self.url.path().to_string())
             .digest(self.digest.clone())
-            .version(None)
-            .build()
-            .context(error::IdSnafu)?;
+            .build();
         trace!(component = "source", type = "remote", "calculated id to be {id}");
         Ok(id)
     }
@@ -111,19 +106,17 @@ impl SourceImpl for RemoteSource {
             let mut reader =
                 StreamReader::new(response.bytes_stream().map_err(std::io::Error::other));
 
-            let mut artifact = ArtifactBuilder::default()
+            let mut artifact = Artifact::builder()
                 .config(
-                    ConfigBuilder::default()
+                    Config::builder()
                         .id(id.clone())
                         .metadata(json!({
                             "source": url.clone().to_string()
                         }))
-                        .build()
-                        .unwrap(),
+                        .build(),
                 )
                 .media_type(MediaType::Manifest)
-                .build()
-                .context(error::ArtifactSnafu)?;
+                .build();
 
             // Remote sources are stored in a single layer of the artifact
             let mut writer = storage.safe_start_layer().await?;
@@ -181,17 +174,11 @@ impl SourceImpl for RemoteSource {
 pub mod error {
     use snafu::Snafu;
 
-    use edo::{
-        context::error::ContextError,
-        source::SourceError,
-        storage::{ArtifactBuilderError, IdBuilderError},
-    };
+    use edo::{context::error::ContextError, source::SourceError};
 
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
     pub enum RemoteSourceError {
-        #[snafu(display("failed to create artifact manifest: {source}"))]
-        Artifact { source: ArtifactBuilderError },
         #[snafu(transparent)]
         Context {
             #[snafu(source(from(edo::context::ContextError, Box::new)))]
@@ -203,8 +190,6 @@ pub mod error {
         Digest { actual: String, expected: String },
         #[snafu(display("remote source definition requires a field '{field}' with type '{type_}"))]
         Field { field: String, type_: String },
-        #[snafu(display("failed to create artifact id: {source}"))]
-        Id { source: IdBuilderError },
         #[snafu(display("io error occured during remote source fetch: {source}"))]
         Io { source: std::io::Error },
         #[snafu(display("failed to make request to remote: {source}"))]

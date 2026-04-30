@@ -19,13 +19,13 @@ base16               = "0.2"
 base64               = "0.22"
 bimap                = "0.6"
 blake3               = "1.8"
+bon                  = "3.9"
 bytes                = "1.11"
 cfg-if               = "1.0"
 chrono               = { version = "0.4", features = ["serde"] }
 clap                 = { version = "4.6", features = ["derive"] }
 daggy                = "0.9"
 dashmap              = { version = "6.1", features = ["serde"] }
-derive_builder       = "0.20"
 dialoguer            = "0.12"
 duct                 = "1"
 futures              = "0.3"

@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use edo::context::{Addr, Context, FromNode, Handle, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::Source;
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType};
 use edo::transform::{TransformError, TransformImpl, TransformResult, TransformStatus};
 
 use async_trait::async_trait;
@@ -132,13 +130,11 @@ impl TransformImpl for ScriptTransform {
             .arch
             .as_ref()
             .map(|arch| ctx.args().get("arch").cloned().unwrap_or(arch.clone()));
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(self.addr.to_id())
             .digest(digest)
-            .version(None)
-            .arch(arch)
-            .build()
-            .unwrap();
+            .maybe_arch(arch)
+            .build();
         trace!(component = "transform", type = "script", "id is calculated to be {id}");
         Ok(id.clone())
     }
@@ -219,11 +215,10 @@ impl TransformImpl for ScriptTransform {
             cmd.send("{{build-root}}").await?;
 
             // The result of a script transform is everything put in the install-root
-            let mut artifact = ArtifactBuilder::default()
-                .config(ConfigBuilder::default().id(id.clone()).build().unwrap())
+            let mut artifact = Artifact::builder()
+                .config(Config::builder().id(id.clone()).build())
                 .media_type(MediaType::Manifest)
-                .build()
-                .unwrap();
+                .build();
 
             // Open a layer to store the result in
             let writer = ctx.storage().safe_start_layer().await?;

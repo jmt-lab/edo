@@ -10,7 +10,7 @@ pub use compose::ComposeTransform;
 pub use import::ImportTransform;
 pub use script::ScriptTransform;
 
-async fn parse_sources<E, F>(
+pub async fn parse_sources<E, F>(
     addr: &Addr,
     node: &Node,
     ctx: &Context,
@@ -35,7 +35,7 @@ where
     Ok(sources)
 }
 
-async fn parse_depends<E, F>(node: &Node, key: &str, field_error: F) -> Result<Vec<Addr>, E>
+pub async fn parse_depends<E, F>(node: &Node, key: &str, field_error: F) -> Result<Vec<Addr>, E>
 where
     E: snafu::Error + From<ContextError>,
     F: Fn(&str, &str) -> E,

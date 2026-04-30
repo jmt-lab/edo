@@ -1,11 +1,11 @@
 [package]
-name = "edo"
-version = "0.1.0"
-edition = "2024"
-authors = ["Jarrett Tierney <jmt@amazon.com>"]
+authors    = ["Jarrett Tierney <jmt@amazon.com>"]
+edition    = "2024"
+keywords   = ["edo"]
+license    = "MIT OR Apache-2.0"
+name       = "edo"
 repository = "https://github.com/awslabs/edo"
-license = "MIT OR Apache-2.0"
-keywords = ["edo"]
+version    = "0.1.0"
 
 [dependencies]
 arc-handle         = { workspace = true }
@@ -17,27 +17,27 @@ aws-sdk-s3         = { workspace = true }
 base16             = { workspace = true }
 bimap              = { workspace = true }
 blake3             = { workspace = true }
+bon                = { workspace = true }
 chrono             = { workspace = true }
 daggy              = { workspace = true }
 dashmap            = { workspace = true }
-derive_builder     = { workspace = true }
 dialoguer          = { workspace = true }
 duct               = { workspace = true }
 futures            = { workspace = true }
 handlebars         = { workspace = true }
 home               = { workspace = true }
-indicatif          = { workspace = true }
 indexmap           = { workspace = true }
+indicatif          = { workspace = true }
 merkle_hash        = { workspace = true }
 names              = { workspace = true }
 ocilot             = { workspace = true }
-owo-colors         = { workspace = true }
 os_pipe            = { workspace = true }
+owo-colors         = { workspace = true }
 parking_lot        = { workspace = true }
 rand               = { workspace = true }
 regex              = { workspace = true }
-resolvo            = { workspace = true }
 reqwest            = { workspace = true }
+resolvo            = { workspace = true }
 semver             = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
@@ -49,6 +49,6 @@ toml               = { workspace = true }
 tracing            = { workspace = true }
 tracing-indicatif  = { workspace = true }
 tracing-subscriber = { workspace = true }
-uuid               = { workspace = true }
 url                = { workspace = true }
+uuid               = { workspace = true }
 which              = { workspace = true }

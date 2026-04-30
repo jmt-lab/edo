@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use edo::{
     context::{Addr, Context, FromNode, Handle, Log, Node, non_configurable},
     environment::Environment,
-    storage::{ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType},
+    storage::{Artifact, Compression, Config, Id, MediaType},
     transform::{TransformImpl, TransformResult, TransformStatus},
 };
 use snafu::OptionExt;
@@ -64,13 +64,11 @@ impl TransformImpl for ComposeTransform {
             .as_ref()
             .map(|arch| ctx.args().get("arch").cloned().unwrap_or(arch.clone()));
 
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(self.addr.to_id())
             .digest(digest)
-            .version(None)
-            .arch(arch)
-            .build()
-            .unwrap();
+            .maybe_arch(arch)
+            .build();
         trace!(component = "transform", type = "compose", "id is calculated to be {id}");
         Ok(id.clone())
     }
@@ -124,11 +122,10 @@ impl TransformImpl for ComposeTransform {
             let id = self.get_unique_id(ctx).await?;
 
             // Create the artifact manifest
-            let mut artifact = ArtifactBuilder::default()
-                .config(ConfigBuilder::default().id(id.clone()).build().unwrap())
+            let mut artifact = Artifact::builder()
+                .config(Config::builder().id(id.clone()).build())
                 .media_type(MediaType::Manifest)
-                .build()
-                .unwrap();
+                .build();
 
             // A Compose transform combines physically all the child dependents,
             // we should add a Combine transform that just does a layer collection.

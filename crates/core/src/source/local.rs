@@ -2,9 +2,7 @@ use async_trait::async_trait;
 use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType, Storage,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 use merkle_hash::MerkleTree;
 use snafu::{OptionExt, ResultExt};
 use std::path::{Path, PathBuf, absolute};
@@ -69,7 +67,7 @@ impl SourceImpl for LocalSource {
         // Local files will never be precached usually
         let digest = base16::encode_lower(hash.as_slice());
 
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(
                 self.path
                     .file_name()
@@ -77,10 +75,8 @@ impl SourceImpl for LocalSource {
                     .to_string_lossy()
                     .into_owned(),
             )
-            .version(None)
             .digest(digest)
-            .build()
-            .context(error::IdSnafu)?;
+            .build();
         trace!(component = "source", type = "local", "calculated id to be {id}");
         Ok(id)
     }
@@ -89,10 +85,10 @@ impl SourceImpl for LocalSource {
         let id = self.get_unique_id().await?;
 
         // First create the manifest
-        let mut artifact = ArtifactBuilder::default()
-            .config(ConfigBuilder::default().id(id).build().unwrap())
-            .build()
-            .unwrap();
+        let mut artifact = Artifact::builder()
+            .media_type(MediaType::File(Compression::None))
+            .config(Config::builder().id(id).build())
+            .build();
         // Start our layer
         let mut writer = storage.safe_start_layer().await?;
         // If the path is a file we do that
@@ -152,7 +148,7 @@ impl SourceImpl for LocalSource {
 }
 
 pub mod error {
-    use edo::{context::error::ContextError, source::SourceError, storage::IdBuilderError};
+    use edo::{context::error::ContextError, source::SourceError};
     use snafu::Snafu;
 
     #[derive(Snafu, Debug)]
@@ -164,8 +160,6 @@ pub mod error {
         Archive { source: std::io::Error },
         #[snafu(display("local source definition field '{field}' should be a '{type_}'"))]
         Field { field: String, type_: String },
-        #[snafu(display("failed to create id: {source}"))]
-        Id { source: IdBuilderError },
         #[snafu(display("failed to calculate merkle hash of directory: {source}"))]
         Merkle {
             source: merkle_hash::error::IndexingError,

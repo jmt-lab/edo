@@ -17,3 +17,4 @@ tokio             = { workspace = true }
 tracing           = { workspace = true }
 edo               = { path = "../edo" }
 edo-core          = { path = "../core" }
+bon = "3.9.1"

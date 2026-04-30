@@ -6,9 +6,7 @@ use async_trait::async_trait;
 use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType, Storage,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 use edo::util::{cmd_noinput, cmd_pipeout, copy_r};
 use merkle_hash::MerkleTree;
 use snafu::{OptionExt, ResultExt};
@@ -103,7 +101,7 @@ impl SourceImpl for VendorSource {
         // Local files will never be precached usually
         let digest = base16::encode_lower(hash.as_slice());
 
-        Ok(IdBuilder::default()
+        Ok(Id::builder()
             .name(
                 self.path
                     .file_name()
@@ -111,10 +109,8 @@ impl SourceImpl for VendorSource {
                     .to_string_lossy()
                     .into_owned(),
             )
-            .version(None)
             .digest(digest)
-            .build()
-            .unwrap())
+            .build())
     }
 
     async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
@@ -178,11 +174,10 @@ impl SourceImpl for VendorSource {
         }
 
         // Build the artifact manifest
-        let mut artifact = ArtifactBuilder::default()
-            .config(ConfigBuilder::default().id(id.clone()).build().unwrap())
+        let mut artifact = Artifact::builder()
+            .config(Config::builder().id(id.clone()).build())
             .media_type(MediaType::Manifest)
-            .build()
-            .unwrap();
+            .build();
 
         // Create a layer for the resulting archive
         let mut writer = storage.safe_start_layer().await?;

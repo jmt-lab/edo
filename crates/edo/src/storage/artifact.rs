@@ -1,5 +1,5 @@
 use super::{StorageResult, error, id::Id};
-use derive_builder::Builder;
+use bon::Builder;
 use ocilot::models::Platform;
 use regex::Regex;
 use semver::VersionReq;
@@ -202,14 +202,13 @@ pub type Metadata = serde_json::Value;
 pub type Requires = BTreeMap<String, BTreeMap<String, VersionReq>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Builder)]
-#[builder(setter(into))]
 pub struct Config {
     id: Id,
-    #[builder(setter(into), default)]
+    #[builder(into, default = BTreeSet::new())]
     provides: BTreeSet<String>,
-    #[builder(setter(into), default)]
+    #[builder(into, default = Requires::new())]
     requires: Requires,
-    #[builder(setter(into), default)]
+    #[builder(into, default = Metadata::default())]
     metadata: Metadata,
 }
 
@@ -279,12 +278,14 @@ impl<'de> Deserialize<'de> for LayerDigest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Builder)]
-#[builder(setter(into))]
 pub struct Layer {
+    #[builder(into)]
     media_type: MediaType,
+    #[builder(into)]
     digest: LayerDigest,
+    #[builder(into)]
     size: usize,
-    #[builder(setter(into), default)]
+    #[builder(into)]
     platform: Option<Platform>,
 }
 
@@ -301,12 +302,12 @@ impl Layer {
 /// files. This structure usually acts as a fully opened handle to an artifact, and actually contains the manifest
 /// data.
 #[derive(Serialize, Deserialize, Debug, Clone, Builder)]
-#[builder(setter(into))]
 pub struct Artifact {
-    #[builder(setter(into), default)]
+    #[builder(into)]
     media_type: MediaType,
+    #[builder(into)]
     config: Config,
-    #[builder(setter(into), default)]
+    #[builder(into, default = Vec::new())]
     layers: Vec<Layer>,
 }
 

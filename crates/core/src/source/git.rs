@@ -2,9 +2,7 @@ use async_trait::async_trait;
 use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
 use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
-use edo::storage::{
-    Artifact, ArtifactBuilder, Compression, ConfigBuilder, Id, IdBuilder, MediaType, Storage,
-};
+use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 use edo::util::cmd_noinput;
 use snafu::{OptionExt, ResultExt};
 use std::collections::HashMap;
@@ -62,12 +60,10 @@ non_configurable!(GitSource, error::Error);
 #[async_trait]
 impl SourceImpl for GitSource {
     async fn get_unique_id(&self) -> SourceResult<Id> {
-        let id = IdBuilder::default()
+        let id = Id::builder()
             .name(format!("{}@{}", self.url, self.reference))
-            .version(None)
             .digest(base16::encode_lower(self.reference.as_bytes()))
-            .build()
-            .context(error::IdSnafu)?;
+            .build();
         trace!(component = "source", type = "git", "calculated id to be {id}");
         Ok(id)
     }
@@ -93,20 +89,18 @@ impl SourceImpl for GitSource {
             )
             .context(error::GitSnafu)?;
             // Make our initial artifact manifest
-            let mut artifact = ArtifactBuilder::default()
+            let mut artifact = Artifact::builder()
                 .media_type(MediaType::Manifest)
                 .config(
-                    ConfigBuilder::default()
+                    Config::builder()
                         .metadata(serde_json::json!({
                             "repository": self.url,
                             "reference": self.reference
                         }))
                         .id(id.clone())
-                        .build()
-                        .unwrap(),
+                        .build(),
                 )
-                .build()
-                .unwrap();
+                .build();
 
             // Now we want to open a single layer which we will archive the source
             let mut writer = storage.safe_start_layer().await?;
@@ -158,7 +152,7 @@ impl SourceImpl for GitSource {
 }
 
 pub mod error {
-    use edo::{context::error::ContextError, source::SourceError, storage::IdBuilderError};
+    use edo::{context::error::ContextError, source::SourceError};
     use snafu::Snafu;
 
     #[derive(Snafu, Debug)]
@@ -170,8 +164,6 @@ pub mod error {
         Field { field: String, type_: String },
         #[snafu(display("failed to invoke git cli: {source}"))]
         Git { source: std::io::Error },
-        #[snafu(display("failed to create id: {source}"))]
-        Id { source: IdBuilderError },
         #[snafu(transparent)]
         Project {
             #[snafu(source(from(edo::context::ContextError, Box::new)))]
