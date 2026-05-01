@@ -46,13 +46,7 @@ fn handle_sources(namespace: &Addr, node: &Node, sources: &BTreeMap<Addr, Node>)
                 namespace.join(&addr)
             };
             info!("checking for source at: {caddr}");
-            table.insert(
-                "source".into(),
-                sources
-                    .get(&caddr)
-                    .context(error::NotValidSourceSnafu { id: addr })?
-                    .clone(),
-            );
+            table.insert("source".into(), Node::new_string(caddr.to_string()));
         } else if let Some(list) = src.as_list() {
             let mut items = Vec::new();
             for item in list.iter() {
@@ -65,12 +59,7 @@ fn handle_sources(namespace: &Addr, node: &Node, sources: &BTreeMap<Addr, Node>)
                 } else {
                     namespace.join(&addr)
                 };
-                items.push(
-                    sources
-                        .get(&caddr)
-                        .context(error::NotValidSourceSnafu { id: addr })?
-                        .clone(),
-                );
+                items.push(Node::new_string(caddr.to_string()));
             }
             table.insert("source".into(), Node::new_list(items));
         }
@@ -104,30 +93,88 @@ impl Project {
             transforms: BTreeMap::new(),
             need_resolution: BTreeMap::new(),
         };
-
-        project.walk(&Addr::default(), path.as_ref())?;
+        let mut sources = BTreeMap::new();
+        project.walk(&Addr::default(), path.as_ref(), &mut sources)?;
+        project.resolve_sources(&sources)?;
         project.build(ctx, error_on_lock).await?;
         Ok(())
     }
 
-    fn walk(&mut self, namespace: &Addr, directory: &Path) -> Result<()> {
+    fn walk(
+        &mut self,
+        namespace: &Addr,
+        directory: &Path,
+        sources: &mut BTreeMap<Addr, Node>,
+    ) -> Result<()> {
         let read = read_dir(directory).context(error::IoSnafu)?;
         for entry in read {
             let entry = entry.context(error::IoSnafu)?;
             let path = entry.path();
             if path.is_file() && path.file_name().and_then(|x| x.to_str()).unwrap() == "edo.toml" {
                 // This is a barkml defined build file
-                self.load_toml(namespace, &path)?;
+                sources.extend(self.load_toml(namespace, &path)?);
             } else if path.is_dir() {
                 let dir_name = path.file_name().and_then(|x| x.to_str()).unwrap();
                 let addr = namespace.join(dir_name);
-                self.walk(&addr, &path)?;
+                self.walk(&addr, &path, sources)?;
             }
         }
         Ok(())
     }
 
-    fn load_toml(&mut self, namespace: &Addr, file: &Path) -> Result<()> {
+    fn resolve_sources(&mut self, sources: &BTreeMap<Addr, Node>) -> Result<()> {
+        for (name, node) in self
+            .environments
+            .iter_mut()
+            .chain(self.transforms.iter_mut())
+        {
+            debug!(component = "project", "mapping sources for element {name}");
+            let mut table = node.get_table().context(error::FieldSnafu {
+                field: "environment",
+                type_: "table",
+            })?;
+            if let Some(source) = table.get("source") {
+                if let Some(list) = source.as_list() {
+                    let mut items = Vec::new();
+                    for entry in list.iter() {
+                        let addr = Addr::parse(&entry.as_string().context(error::FieldSnafu {
+                            field: "source",
+                            type_: "string",
+                        })?)?;
+                        items.push(
+                            sources
+                                .get(&addr)
+                                .context(error::NotValidSourceSnafu {
+                                    id: addr.to_string(),
+                                })?
+                                .clone(),
+                        );
+                    }
+                    table.insert("source".to_string(), Node::new_list(items));
+                } else {
+                    let mut addr =
+                        Addr::parse(&source.as_string().context(error::FieldSnafu {
+                            field: "source",
+                            type_: "string",
+                        })?)?;
+                    table.insert(
+                        "source".to_string(),
+                        sources
+                            .get(&addr)
+                            .context(error::NotValidSourceSnafu {
+                                id: addr.to_string(),
+                            })?
+                            .clone(),
+                    );
+                }
+            }
+            node.set_table(table);
+        }
+        Ok(())
+    }
+
+    fn load_toml(&mut self, namespace: &Addr, file: &Path) -> Result<BTreeMap<Addr, Node>> {
+        debug!(component = "project", "loading transforms from {file:?}");
         let config_bytes = read(file).context(error::IoSnafu)?;
         let config: Schema = toml::from_slice(&config_bytes).context(error::DeserializeSnafu)?;
         match config {
@@ -162,9 +209,9 @@ impl Project {
                     let addr = namespace.join(&name);
                     self.vendors.insert(addr, node);
                 }
+                return Ok(sources);
             }
         }
-        Ok(())
     }
 
     /// Resolves dependencies, registers plugins/environments/transforms, and
