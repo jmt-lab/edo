@@ -12,9 +12,9 @@ async-recursion      = "1.1"
 async-trait          = "0.1"
 aws-config           = "1"
 aws-credential-types = "1"
-aws-sdk-ecr          = "1"
-aws-sdk-ecrpublic    = "1"
-aws-sdk-s3           = "1"
+aws-sdk-ecr          = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-ecrpublic    = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3           = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 base16               = "0.2"
 base64               = "0.22"
 bimap                = "0.6"
