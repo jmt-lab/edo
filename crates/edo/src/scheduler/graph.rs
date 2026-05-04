@@ -199,13 +199,17 @@ impl Graph {
                             error!("{} failed: {e}", node.addr);
                             node.set_failed();
                             failure_occured = true;
-                            continue;
                         }
                     }
                 } else {
                     // In the prebuilt case always flag success
                     node.set_success();
                 }
+
+                // Always decrement inflight to avoid deadlock — the dispatch loop
+                // exits when inflight reaches 0, so we must decrement for every
+                // completed task regardless of success or failure.
+                parent_inflight.lock().await.fetch_sub(1, Ordering::SeqCst);
 
                 if failure_occured {
                     // If a failure has occured do not keep walking the dag
@@ -246,8 +250,6 @@ impl Graph {
                         debug!(thread = "queue", "{} is not pending", node.addr);
                     }
                 }
-                // We decrease the inflight here to prevent a race condition and ensure all nodes are visited
-                parent_inflight.lock().await.fetch_sub(1, Ordering::SeqCst);
             }
             Ok::<(), error::SchedulerError>(())
         });
@@ -305,6 +307,9 @@ impl Graph {
                     break;
                 }
             }
+            // Yield to allow the parent task to process completions and decrement
+            // inflight, preventing busy-spin starvation on low-concurrency runtimes.
+            tokio::task::yield_now().await;
         }
         // We need to make sure we drop the sender here to avoid hanging on the final task
         drop(sender);
