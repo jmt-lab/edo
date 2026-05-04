@@ -1,8 +1,11 @@
+//! Error types for the scheduler subsystem.
+
 use snafu::Snafu;
 use tokio::{sync::mpsc::error::SendError, task::JoinError};
 
 use crate::context::Addr;
 
+/// Errors that can occur during task scheduling and execution.
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub))]
 pub enum SchedulerError {

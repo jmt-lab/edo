@@ -1,8 +1,12 @@
+//! Interactive transform executor with error recovery.
+//!
+//! Handles running a single transform, catching failures, and prompting the
+//! user with options to view logs, retry, open a shell, or abort.
+
 use std::fs::read_to_string;
-
 use dialoguer::{Editor, Select};
+use snafu::ResultExt;
 use tracing_indicatif::suspend_tracing_indicatif;
-
 use super::{Result, error};
 use crate::{
     context::{Handle, Log},
@@ -10,9 +14,12 @@ use crate::{
     storage::Artifact,
     transform::{Transform, TransformStatus},
 };
-use snafu::ResultExt;
 
-/// Implements the main transform executor handling error catching, retry and more
+/// Executes a transform with interactive error recovery.
+///
+/// Runs the given transform within the provided environment. On failure,
+/// prompts the user with options to view logs, retry, open a shell, or quit.
+/// On success, uploads the resulting artifact to the build cache.
 pub async fn execute(
     log: &Log,
     ctx: &Handle,
@@ -61,8 +68,12 @@ pub async fn execute(
                         let ans = options[index];
                         match ans {
                             "view log" => {
-                                let log_text = read_to_string(log_file.as_ref().unwrap())
-                                    .context(error::IoSnafu)?;
+                                let log_text = read_to_string(
+                                    log_file
+                                        .as_ref()
+                                        .expect("log_file is Some when 'view log' option is present"),
+                                )
+                                .context(error::IoSnafu)?;
                                 Editor::new().edit(&log_text).context(error::InquireSnafu)?;
                                 continue 'prompt;
                             }

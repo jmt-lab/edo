@@ -1,9 +1,14 @@
-use super::execute::execute;
-use super::node::Node;
-use super::{Result, error};
-use crate::context::{Addr, Context, Handle, Log};
-use crate::storage::Artifact;
-use crate::transform::Transform;
+//! DAG execution graph for scheduling transforms.
+//!
+//! Constructs a directed acyclic graph from transform dependencies, resolves
+//! build-cache hits, and drives parallel execution within batch-size limits.
+
+use std::collections::{HashSet, VecDeque};
+use std::future::Future;
+use std::ops::Index;
+use std::path::Path;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, atomic::Ordering};
 use async_recursion::async_recursion;
 use bimap::BiHashMap;
 use daggy::petgraph::Direction;
@@ -14,16 +19,17 @@ use dashmap::DashMap;
 use futures::future::try_join_all;
 use snafu::OptionExt;
 use snafu::ResultExt;
-use std::collections::{HashSet, VecDeque};
-use std::future::Future;
-use std::ops::Index;
-use std::path::Path;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, atomic::Ordering};
 use tempfile::TempDir;
 use tokio::task::{JoinError, JoinHandle};
 use tracing::Instrument;
+use super::execute::execute;
+use super::node::Node;
+use super::{Result, error};
+use crate::context::{Addr, Context, Handle, Log};
+use crate::storage::Artifact;
+use crate::transform::Transform;
 
+/// DAG-based execution graph that manages transform dependencies and parallel execution.
 #[derive(Clone)]
 pub struct Graph {
     graph: Dag<Arc<Node>, String>,
@@ -41,6 +47,7 @@ unsafe impl Send for Graph {}
 unsafe impl Sync for Graph {}
 
 impl Graph {
+    /// Creates a new execution graph with the given maximum batch size for parallel tasks.
     pub fn new(batch_size: u64) -> Self {
         trace!(
             component = "execution",
@@ -53,6 +60,10 @@ impl Graph {
         }
     }
 
+    /// Recursively adds a transform and its dependencies to the graph.
+    ///
+    /// Returns the `NodeIndex` of the added (or existing) node. Edges are created
+    /// from each dependency to the dependent node.
     #[async_recursion]
     pub async fn add(&mut self, ctx: &Context, addr: &Addr) -> Result<NodeIndex> {
         // If we already have this node don't register this
@@ -77,6 +88,10 @@ impl Graph {
         Ok(node_index)
     }
 
+    /// Fetches sources and artifacts for all nodes in parallel.
+    ///
+    /// Skips nodes whose builds are already cached. Each fetch operation runs
+    /// as a separate Tokio task for maximum throughput.
     pub async fn fetch(&self, ctx: &Context) -> Result<()> {
         // Now we can parallel iterate to do the fetch
         let mut tasks = Vec::new();
@@ -108,6 +123,11 @@ impl Graph {
         Ok(())
     }
 
+    /// Executes the transform graph starting from the given address.
+    ///
+    /// Drives execution by dispatching leaf nodes first and walking the DAG
+    /// upward as dependencies complete. Respects the configured batch-size limit
+    /// for in-flight tasks and skips nodes that already have cached builds.
     pub async fn run(&self, path: &Path, ctx: &Context, addr: &Addr) -> Result<()> {
         // Check if this address is already built, if so then do nothing
         let ctx = ctx.get_handle();
@@ -382,6 +402,7 @@ impl Graph {
     }
 }
 
+/// Awaits all join handles, collecting successes or returning aggregated failures.
 async fn wait<I, R>(handles: I) -> Result<Vec<R>>
 where
     R: Clone,
