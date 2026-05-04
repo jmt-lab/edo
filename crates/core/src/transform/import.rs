@@ -7,6 +7,7 @@ use edo::transform::{TransformImpl, TransformResult, TransformStatus};
 use indexmap::IndexMap;
 use std::path::Path;
 
+/// A transform that imports sources directly into the build environment as an artifact.
 pub struct ImportTransform {
     pub addr: Addr,
     pub sources: IndexMap<String, Source>,

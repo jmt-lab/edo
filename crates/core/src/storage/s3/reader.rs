@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use tokio::io::AsyncRead;
 
+/// An async reader that streams an S3 object in chunks, implementing [`AsyncRead`].
 pub struct ObjectReader {
     client: Arc<Client>,
     bucket: String,
@@ -19,6 +20,7 @@ pub struct ObjectReader {
 }
 
 impl ObjectReader {
+    /// Creates a new reader for the given S3 object, querying its size on construction.
     pub async fn new(client: Arc<Client>, bucket: &str, key: &str) -> Result<Self> {
         let head_object = client
             .head_object()

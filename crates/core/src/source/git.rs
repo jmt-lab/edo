@@ -11,6 +11,7 @@ use tempfile::tempdir;
 use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 
+/// A source that clones a Git repository at a specific reference.
 pub struct GitSource {
     url: String,
     reference: String,

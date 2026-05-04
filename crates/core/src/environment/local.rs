@@ -13,6 +13,7 @@ use tokio::fs::File;
 use tokio::fs::create_dir_all;
 use tracing::Instrument;
 
+/// A farm that creates local (host-native) build environments.
 #[derive(Default)]
 pub struct LocalFarm {}
 
@@ -45,6 +46,7 @@ impl FromNode for LocalFarm {
 
 non_configurable!(LocalFarm, error::Error);
 
+/// A local build environment rooted at a filesystem path.
 pub struct LocalEnv {
     path: PathBuf,
     env: DashMap<String, String>,

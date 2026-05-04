@@ -11,6 +11,7 @@ use indexmap::IndexMap;
 use ocilot::models::Platform;
 use snafu::OptionExt;
 
+/// A transform that executes shell commands in a build environment to produce an artifact.
 pub struct ScriptTransform {
     pub addr: Addr,
     pub arch: Option<String>,

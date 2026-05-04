@@ -28,6 +28,7 @@ mod reader;
 type Result<T> = std::result::Result<T, error::Error>;
 const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10mb
 
+/// An S3-backed storage backend for artifact caching and retrieval.
 pub struct S3Backend {
     client: Arc<Client>,
     bucket: String,
@@ -65,6 +66,7 @@ impl FromNodeNoContext for S3Backend {
 non_configurable_no_context!(S3Backend, edo::storage::StorageError);
 
 impl S3Backend {
+    /// Creates a new S3 backend with the given SDK configuration, bucket, and optional key prefix.
     pub async fn new_(
         sdk_config: &SdkConfig,
         bucket: &str,
@@ -96,6 +98,7 @@ impl S3Backend {
         })
     }
 
+    /// Returns the S3 key prefix for blob storage.
     pub fn blob_key(&self) -> PathBuf {
         if let Some(prefix) = self.prefix.as_ref() {
             prefix.join("blobs/blake3")
@@ -104,6 +107,7 @@ impl S3Backend {
         }
     }
 
+    /// Loads the artifact catalog from S3, returning a default catalog if none exists.
     pub async fn load(&self) -> StorageResult<Catalog> {
         // check if the catalog exists
         if self
@@ -132,6 +136,7 @@ impl S3Backend {
         Ok(catalog)
     }
 
+    /// Waits for any existing lock file to be released before proceeding.
     pub async fn wait_for_lock(&self) -> StorageResult<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         let mut attempts = 1;
@@ -159,6 +164,7 @@ impl S3Backend {
         Ok(())
     }
 
+    /// Writes the catalog to S3, using a lock file to coordinate concurrent access.
     pub async fn flush(&self, catalog: &Catalog) -> StorageResult<()> {
         self.wait_for_lock().await?;
         // First we create a lock file to signal any one else that we are writing

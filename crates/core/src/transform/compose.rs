@@ -8,6 +8,7 @@ use edo::{
 use snafu::OptionExt;
 use std::path::Path;
 
+/// A transform that composes multiple dependency artifacts into a single output artifact.
 pub struct ComposeTransform {
     pub addr: Addr,
     pub arch: Option<String>,

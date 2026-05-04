@@ -2,6 +2,7 @@ use aws_sdk_s3::error::SdkError;
 use edo::storage::StorageError;
 use snafu::Snafu;
 
+/// Errors that can occur when interacting with the S3 storage backend.
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum Error {

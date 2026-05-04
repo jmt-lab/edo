@@ -25,6 +25,7 @@ pub mod transform;
 /// Vendors
 pub mod vendor;
 
+/// Registers all built-in component implementations (sources, transforms, environments, storage backends, vendors) with the given context.
 pub fn register_core(ctx: &Context) {
     let registry = ctx.registry();
     registry.register_backend(
@@ -106,10 +107,12 @@ pub fn register_core(ctx: &Context) {
         }),
     );
 }
+/// Error types for the core plugin.
 pub mod error {
     use edo::context::ContextError;
     use snafu::Snafu;
 
+    /// Errors produced when registering or resolving core plugin components.
     #[derive(Snafu, Debug)]
     #[snafu(visibility(pub))]
     pub enum Error {

@@ -17,6 +17,7 @@ use tokio_tar::Builder;
 use tracing::Instrument;
 use which::which;
 
+/// A source that vendors third-party dependencies (Rust crates, Go modules) into the build.
 pub struct VendorSource {
     path: PathBuf,
     inside: PathBuf,

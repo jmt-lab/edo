@@ -10,6 +10,7 @@ pub use compose::ComposeTransform;
 pub use import::ImportTransform;
 pub use script::ScriptTransform;
 
+/// Parses the `source` list from a transform node and registers each source with the context.
 pub async fn parse_sources<E, F>(
     addr: &Addr,
     node: &Node,
@@ -35,6 +36,7 @@ where
     Ok(sources)
 }
 
+/// Parses a dependency list from the given node key into a vector of addresses.
 pub async fn parse_depends<E, F>(node: &Node, key: &str, field_error: F) -> Result<Vec<Addr>, E>
 where
     E: snafu::Error + From<ContextError>,

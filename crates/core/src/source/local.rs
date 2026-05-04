@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf, absolute};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_tar::Builder;
 
+/// A source backed by a local filesystem path.
 pub struct LocalSource {
     path: PathBuf,
     out: PathBuf,

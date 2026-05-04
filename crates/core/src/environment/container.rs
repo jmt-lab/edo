@@ -28,6 +28,7 @@ pub struct ContainerFarm {
     source: Source,
 }
 
+/// Configuration for the container runtime (e.g. which CLI binary to use).
 #[derive(Default, Clone)]
 pub struct ContainerConfig {
     runtime: Option<String>,
@@ -201,7 +202,7 @@ impl FarmImpl for ContainerFarm {
     }
 }
 
-/// Represents a single container environment
+/// A running container environment instance managed by a container runtime.
 pub struct Container {
     config: ContainerConfig,
     name: String,

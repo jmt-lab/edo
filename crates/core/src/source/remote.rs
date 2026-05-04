@@ -13,9 +13,7 @@ use edo::environment::Environment;
 use edo::source::{SourceImpl, SourceResult};
 use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 
-/// A RemoteSource is rather simple
-/// it is responsible for fetching a remote file and storing it as an
-/// artifact
+/// A source that fetches a file from a remote URL and stores it as an artifact.
 pub struct RemoteSource {
     url: Url,
     digest: String,
