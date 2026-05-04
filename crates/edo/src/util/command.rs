@@ -9,6 +9,7 @@ use duct::IntoExecutablePath;
 use std::collections::HashMap;
 use std::io::Write;
 
+/// Convert a [`DashMap`] into a standard [`HashMap`] by cloning all entries.
 pub fn from_dash<K, V>(input: &DashMap<K, V>) -> HashMap<K, V>
 where
     K: std::cmp::Eq + std::hash::Hash + Clone,
@@ -20,6 +21,9 @@ where
         .collect()
 }
 
+/// Run a command with piped stdin, capturing stdout+stderr to the build log.
+///
+/// Returns `true` if the process exits successfully.
 pub fn cmd<P, S, In, A, I>(
     path: P,
     log: &Log,
@@ -53,6 +57,7 @@ where
     Ok(output.status.success())
 }
 
+/// Run a command capturing stdout into a byte vector; stderr goes to the log.
 pub fn cmd_collect_out<P, S, A, I>(
     path: P,
     log: &Log,
@@ -78,6 +83,9 @@ where
     Ok(output.stdout)
 }
 
+/// Run a command piping stdout to a raw file descriptor; stderr goes to the log.
+///
+/// Returns `true` if the process exits successfully.
 pub fn cmd_pipeout<P, F, S, A, I>(
     path: P,
     log: &Log,
@@ -105,6 +113,9 @@ where
     Ok(output.status.success())
 }
 
+/// Run a command with no stdin, merging stdout+stderr to the build log.
+///
+/// Returns `true` if the process exits successfully.
 pub fn cmd_noinput<P, S, A, I>(
     path: P,
     log: &Log,
@@ -131,6 +142,9 @@ where
     Ok(output.status.success())
 }
 
+/// Run a command inheriting the parent process's stdout and stderr (no log redirection).
+///
+/// Returns `true` if the process exits successfully.
 pub fn cmd_noredirect<P, S, A, I>(
     path: P,
     program: S,
@@ -151,6 +165,9 @@ where
     Ok(output.status.success())
 }
 
+/// Run a command discarding both stdout and stderr.
+///
+/// Returns `true` if the process exits successfully.
 pub fn cmd_nulled<P, S, A, I>(
     path: P,
     program: S,

@@ -1,3 +1,14 @@
+//! Source subsystem.
+//!
+//! Defines how source code and dependencies are fetched, cached, and staged
+//! into build environments. A [`Source`] knows how to retrieve a single
+//! artifact (local path, git repo, OCI image, etc.) while a [`Vendor`]
+//! exposes a package registry for semver-based dependency resolution via
+//! [`Resolver`].
+//!
+//! All fallible operations return [`SourceResult`], with failures modelled by
+//! [`SourceError`].
+
 use crate::context::Log;
 use crate::environment::Environment;
 use crate::storage::{Artifact, Id, Storage};
@@ -11,6 +22,7 @@ mod resolver;
 mod vendor;
 mod version;
 
+/// Convenience result alias for fallible source operations.
 pub type SourceResult<T> = std::result::Result<T, error::SourceError>;
 pub use error::SourceError;
 pub use require::*;
@@ -18,7 +30,11 @@ pub use resolver::*;
 pub use vendor::*;
 pub use version::*;
 
-/// A Source represents source code whether locally in project or from an external source
+/// A source of code or artifacts, whether local or remote.
+///
+/// Implementations handle fetching and staging for a single kind of source
+/// (e.g. git clone, local copy, OCI pull). Use [`Source::cache`] in preference
+/// to [`Source::fetch`] to benefit from the local artifact cache.
 #[arc_handle]
 #[async_trait]
 pub trait Source {

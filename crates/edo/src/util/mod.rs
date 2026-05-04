@@ -1,3 +1,10 @@
+//! Utility helpers shared across the crate.
+//!
+//! Provides [`Reader`] and [`Writer`] wrappers with integrated BLAKE3 hashing,
+//! synchronous adapters for async I/O ([`SyncReader`], [`sync`], [`sync_fn`]),
+//! filesystem helpers ([`copy_r`]), and subprocess execution functions that
+//! pipe output through the build log.
+
 mod command;
 mod fs;
 mod reader;

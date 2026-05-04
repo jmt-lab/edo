@@ -50,6 +50,11 @@ impl<R: AsyncRead> SyncReader<R> {
     }
 }
 
+/// Spin-poll a boxed future to completion on the current thread.
+///
+/// Uses a no-op waker — only suitable for futures that will eventually
+/// resolve without requiring an external wake signal (e.g. CPU-bound work
+/// or futures backed by ready data).
 pub fn sync<R>(future: &mut BoxFuture<R>) -> R {
     // Safety: This implements a no-op waker that does nothing when woken
     let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
@@ -64,6 +69,10 @@ pub fn sync<R>(future: &mut BoxFuture<R>) -> R {
     }
 }
 
+/// Spin-poll an async closure to completion on the current thread.
+///
+/// Same caveats as [`sync`] — only use for futures that will resolve
+/// without an external wake.
 pub fn sync_fn<R>(block_: impl AsyncFn() -> R) -> R {
     // Safety: This implements a no-op waker that does nothing when woken
     let mut pl = Box::pin(block_());

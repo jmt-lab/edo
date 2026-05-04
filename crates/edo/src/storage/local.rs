@@ -14,9 +14,11 @@ use uuid::Uuid;
 
 use super::catalog::Catalog;
 
-/// Implements a local storage backend
-/// all layers are stored in blobs/blake3/<digest>...
-/// all manifests are stored in a redb database file
+/// Local filesystem storage backend.
+///
+/// Layers are stored as individual blobs under `blobs/blake3/<digest>` and
+/// manifests are tracked in a JSON catalog file. The shared blob layout means
+/// copy operations are metadata-only.
 #[derive(Debug)]
 pub struct LocalBackend {
     layer_dir: PathBuf,

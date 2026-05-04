@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Recursively copy the directory tree rooted at `from` into `to`.
+///
+/// Creates destination directories as needed and copies all files while
+/// preserving the relative directory structure.
 pub async fn copy_r<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
     let mut stack = Vec::new();
     stack.push(PathBuf::from(from.as_ref()));

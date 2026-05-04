@@ -5,12 +5,21 @@ use snafu::{OptionExt, ensure};
 
 use crate::context::{Addr, Context, FromNode, Node};
 
+/// A resolved dependency requirement parsed from an `edo.toml` `requires` node.
+///
+/// Contains the package name, its semver version requirement, the optional
+/// vendor hint, and the originating address in the project graph.
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Dependency {
+    /// The address of the node that declared this dependency.
     pub addr: Addr,
+    /// The source kind (e.g. `"image"`, `"git"`).
     pub kind: String,
+    /// The package name being depended upon.
     pub name: String,
+    /// The semver requirement that must be satisfied.
     pub version: VersionReq,
+    /// Optional vendor name constraining which registry to resolve from.
     pub vendor: Option<String>,
 }
 

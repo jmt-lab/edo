@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 const ARTIFACT_SCHEMA_VERSION: &str = "v1";
 
-/// Denotes the use of any compression algorithm on a layer
+/// Denotes the compression algorithm applied to a layer's content.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Compression {
     #[serde(rename = ".zst")]
@@ -37,6 +37,10 @@ fn split_by(input: &str, pattern: &Regex) -> String {
 }
 
 impl Compression {
+    /// Detect the compression suffix in a media type string.
+    ///
+    /// Returns the base string (suffix stripped) and the corresponding
+    /// [`Compression`] variant.
     pub fn detect(input: &str) -> StorageResult<(String, Compression)> {
         let zstd = Regex::new(r"[\.\+]{1}zst$").context(error::RegexSnafu)?;
         if zstd.is_match(input) {
@@ -75,7 +79,7 @@ impl fmt::Display for Compression {
     }
 }
 
-/// Denotes the content of a layer
+/// Denotes the content type of a layer within an artifact.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum MediaType {
     #[default]
@@ -89,6 +93,7 @@ pub enum MediaType {
 }
 
 impl MediaType {
+    /// Returns `true` if the media type carries a non-`None` compression.
     pub fn is_compressed(&self) -> bool {
         match self {
             Self::Manifest => false,
@@ -104,6 +109,7 @@ impl MediaType {
         }
     }
 
+    /// Override the compression variant for this media type.
     pub fn set_compression(&mut self, compression: Compression) {
         match self {
             Self::File(comp)
@@ -196,11 +202,15 @@ impl<'de> Deserialize<'de> for MediaType {
     }
 }
 
-/// Type alias for any custom metadata stored in an artifact's manifest
+/// Type alias for arbitrary JSON metadata stored in an artifact's manifest.
 pub type Metadata = serde_json::Value;
-/// Type alias for versioned requirements
+/// Type alias for versioned dependency requirements (`vendor -> name -> requirement`).
 pub type Requires = BTreeMap<String, BTreeMap<String, VersionReq>>;
 
+/// Configuration section of an artifact manifest.
+///
+/// Contains the unique [`Id`], a set of capability strings this artifact
+/// provides, its dependency requirements, and freeform metadata.
 #[derive(Serialize, Deserialize, Clone, Debug, Builder)]
 pub struct Config {
     id: Id,
@@ -231,10 +241,12 @@ impl Config {
     handle!(provides, provides_mut, provides, BTreeSet<String>);
 }
 
+/// A BLAKE3 content digest identifying a layer's blob.
 #[derive(Debug, Clone)]
 pub struct LayerDigest(String);
 
 impl LayerDigest {
+    /// Return the raw hex digest string (without the `blake3:` prefix).
     pub fn digest(&self) -> String {
         self.0.clone()
     }
@@ -277,6 +289,10 @@ impl<'de> Deserialize<'de> for LayerDigest {
     }
 }
 
+/// A single content-addressed blob within an [`Artifact`].
+///
+/// Each layer has a media type describing its content format, a BLAKE3 digest,
+/// a byte size, and an optional platform constraint.
 #[derive(Serialize, Deserialize, Debug, Clone, Builder)]
 pub struct Layer {
     #[builder(into)]

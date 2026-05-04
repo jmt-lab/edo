@@ -8,9 +8,10 @@ use std::{fmt, str::FromStr};
 const UNSUPPORTED_CHARS: &[char] = &['@', ':', '.', '-', '/'];
 const UNSUPPORTED_PREFIX: &[&str] = &["http://", "https://"];
 
-/// Represents the name of the artifact, artifact names cannot
-/// have certain characters in them (@, :, ., -, /) so all of these
-/// are replaced with '_'
+/// The human-readable name portion of an artifact [`Id`].
+///
+/// Certain characters (`@`, `:`, `.`, `-`, `/`) and URL prefixes are replaced
+/// with underscores to ensure filesystem and registry compatibility.
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct Name(String);
 
@@ -50,9 +51,11 @@ impl fmt::Display for Name {
     }
 }
 
-/// Represents the unique id for an artifact, it optionally can contain a
-/// secondary name called the package name, along with an optional version.
-/// All ids contain a blake3 digest
+/// The unique identifier for an artifact in storage.
+///
+/// Composed of a [`Name`], an optional package name, an optional semver
+/// version, an optional architecture tag, and a BLAKE3 content digest.
+/// Serializes to the format `[<package>+]<name>[-<version>][.<arch>]-<digest>`.
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Builder)]
 pub struct Id {
     #[builder(into)]
@@ -67,34 +70,42 @@ pub struct Id {
 }
 
 impl Id {
+    /// Return the artifact name as a string.
     pub fn name(&self) -> String {
         self.name.clone().to_string()
     }
 
+    /// Return the optional package name as a string.
     pub fn package(&self) -> Option<String> {
         self.package.clone().map(|x| x.to_string())
     }
 
+    /// Return a reference to the BLAKE3 hex digest.
     pub fn digest(&self) -> &String {
         &self.digest
     }
 
+    /// Return the optional architecture tag.
     pub fn arch(&self) -> Option<String> {
         self.arch.clone()
     }
 
+    /// Return the optional semver version.
     pub fn version(&self) -> Option<Version> {
         self.version.clone()
     }
 
+    /// Replace the digest with a new value.
     pub fn set_digest(&mut self, digest: &str) {
         self.digest = digest.to_string();
     }
 
+    /// Set the semver version.
     pub fn set_version(&mut self, version: &Version) {
         self.version = Some(version.clone());
     }
 
+    /// Remove the version component from this id.
     pub fn clear_version(&mut self) {
         self.version = None;
     }

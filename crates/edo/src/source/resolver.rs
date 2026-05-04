@@ -18,6 +18,12 @@ use super::version::EdoVersionSet;
 use super::{SourceResult as Result, Vendor, error};
 use std::collections::{HashMap, HashSet};
 
+/// Semver-based dependency resolver backed by [`resolvo`].
+///
+/// Maintains a pool of interned packages and version sets populated by
+/// registered [`Vendor`]s. Call [`Resolver::build_db`] for each package name
+/// to populate candidates, then [`Resolver::resolve`] to compute a satisfying
+/// assignment.
 #[derive(Clone, Default)]
 pub struct Resolver {
     pool: Arc<Pool<EdoVersionSet>>,
@@ -35,6 +41,10 @@ unsafe impl Send for Resolver {}
 unsafe impl Sync for Resolver {}
 
 impl Resolver {
+    /// Resolve a set of dependency requirements into concrete (vendor, name, version) triples.
+    ///
+    /// Returns a map from each dependency's address to its resolved vendor name,
+    /// package name, and version.
     pub fn resolve(
         &self,
         requires: Vec<Dependency>,
@@ -99,6 +109,10 @@ impl Resolver {
         Ok(found)
     }
 
+    /// Populate the resolver's internal database for `name` by querying all registered vendors.
+    ///
+    /// Must be called for every package name that appears in a dependency graph
+    /// before calling [`Resolver::resolve`].
     pub async fn build_db(&self, name: &str) -> Result<()> {
         for entry in self.vendors.iter() {
             let vendor_name = entry.key();
@@ -132,10 +146,12 @@ impl Resolver {
         Ok(())
     }
 
+    /// Register a vendor under the given name for use during resolution.
     pub fn add_vendor(&mut self, name: &str, vendor: Vendor) {
         self.vendors.insert(name.to_string(), vendor);
     }
 
+    /// Build a [`Requirement`] from a [`Dependency`] node against the current pool state.
     pub fn build_requirement(&self, node: &Dependency) -> Result<Requirement> {
         let dep_id = if let Some(name_id) = self.pool.lookup_package_name(&node.name) {
             name_id

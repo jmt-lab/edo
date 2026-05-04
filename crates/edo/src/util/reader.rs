@@ -4,12 +4,18 @@ use std::rc::Rc;
 use std::task::Poll;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+/// An async reader wrapper that computes a BLAKE3 hash of all bytes read.
+///
+/// Implements both [`AsyncRead`] and [`std::io::Read`] (blocking via the
+/// current tokio runtime). Use [`Reader::finish`] after all data has been
+/// consumed to obtain the hex-encoded digest.
 #[derive(Clone)]
 pub struct Reader {
     inner: Rc<Mutex<Inner>>,
 }
 
 impl Reader {
+    /// Wrap an async reader, starting a fresh BLAKE3 hash.
     pub fn new(reader: impl AsyncRead + 'static) -> Self {
         Self {
             inner: Rc::new(Mutex::new(Inner {
@@ -20,6 +26,7 @@ impl Reader {
         }
     }
 
+    /// Finalize the hash and return the hex-encoded BLAKE3 digest of all bytes read so far.
     pub fn finish(&self) -> String {
         let lock = self.inner.lock();
         let hash = lock.hash.finalize();

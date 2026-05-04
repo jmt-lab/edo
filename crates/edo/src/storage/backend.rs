@@ -13,7 +13,11 @@ use super::{
     id::Id,
 };
 
-/// A Backend represents the actual interface to storing artifacts in a location
+/// The low-level interface for storing and retrieving artifacts in a location.
+///
+/// Implementations handle the physical persistence of manifests and layer
+/// blobs (e.g. local filesystem, S3, OCI registry). [`Storage`](super::Storage)
+/// composes multiple backends into a layered cache hierarchy.
 #[arc_handle]
 #[async_trait]
 pub trait Backend {

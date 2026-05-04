@@ -1,3 +1,14 @@
+//! Storage subsystem.
+//!
+//! Provides a layered, content-addressable artifact store modelled after OCI
+//! image layouts. [`Storage`] orchestrates multiple [`Backend`] caches (local,
+//! source, build, output) while [`Artifact`], [`Layer`], and [`Id`] describe
+//! the data model. The default [`LocalBackend`] persists blobs on the
+//! filesystem using BLAKE3 digests.
+//!
+//! All fallible operations return [`StorageResult`], with failures modelled by
+//! [`StorageError`].
+
 mod artifact;
 mod backend;
 mod catalog;
@@ -24,8 +35,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
-/// Storage represents a handle over multiple caches
-/// that represent the storage of artifacts in an edo contexts
+/// Handle over multiple layered artifact caches.
+///
+/// Orchestrates a local cache, zero-or-more source caches (priority-ordered),
+/// an optional build cache, and an optional output cache. All layer data is
+/// content-addressed by BLAKE3 digest.
 #[derive(Clone)]
 pub struct Storage {
     // We protect the implementation inside an arced rwlock as we do
@@ -287,8 +301,8 @@ impl Inner {
     }
 }
 
-// The storage methods should always return the parent crate result
 impl Storage {
+    /// Initialize storage with the given backend as the local cache.
     pub async fn init(backend: &Backend) -> StorageResult<Self> {
         Ok(Self {
             inner: Arc::new(RwLock::new(Inner::init(backend.clone()).await?)),
@@ -386,10 +400,12 @@ impl Storage {
     }
 
     /// Prune the local cache of rerun artifacts
+    /// Prune the local cache of all artifacts sharing a prefix with `id` except `id` itself.
     pub async fn prune_local(&self, id: &Id) -> StorageResult<()> {
         self.inner.read().await.prune_local(id).await
     }
 
+    /// Remove all artifacts and blobs from the local cache.
     pub async fn prune_local_all(&self) -> StorageResult<()> {
         self.inner.read().await.prune_local_all().await
     }

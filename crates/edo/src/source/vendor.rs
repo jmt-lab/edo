@@ -5,7 +5,11 @@ use async_trait::async_trait;
 use semver::{Version, VersionReq};
 use std::collections::{HashMap, HashSet};
 
-/// A Vendor represents a remote provider for sources with support for dependency resolution
+/// A remote package registry that provides versioned source artifacts.
+///
+/// Vendors are queried by the [`Resolver`](super::Resolver) to discover
+/// available versions and transitive dependencies, and later to materialize
+/// concrete [`Node`] definitions for fetching.
 #[arc_handle]
 #[async_trait]
 pub trait Vendor {

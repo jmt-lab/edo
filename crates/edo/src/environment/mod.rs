@@ -64,6 +64,10 @@ pub trait Environment {
 }
 
 impl Environment {
+    /// Create a new deferred [`Command`] bound to this environment.
+    ///
+    /// The returned command can accumulate script steps and template variables
+    /// before being dispatched via [`Command::send`].
     pub fn defer_cmd(&self, log: &Log, id: &Id) -> Command {
         Command::new(log, id, self)
     }

@@ -4,12 +4,17 @@ use std::rc::Rc;
 use std::task::Poll;
 use tokio::io::AsyncWrite;
 
+/// An async writer wrapper that computes a BLAKE3 hash of all bytes written.
+///
+/// Implements [`AsyncWrite`]. After writing is complete call [`Writer::finish`]
+/// to obtain the hex-encoded content digest.
 #[derive(Clone)]
 pub struct Writer {
     inner: Rc<Mutex<Inner>>,
 }
 
 impl Writer {
+    /// Wrap an async writer with a target name and start a fresh BLAKE3 hash.
     pub fn new(target: String, writer: impl AsyncWrite + Send + Sync + 'static) -> Self {
         Self {
             inner: Rc::new(Mutex::new(Inner {
@@ -22,18 +27,25 @@ impl Writer {
         }
     }
 
+    /// Return the total number of bytes written so far.
     pub fn size(&self) -> usize {
         self.inner.lock().size
     }
 
+    /// Override the computed digest with a predetermined value.
     pub fn set_digest(&self, digest: &str) {
         self.inner.lock().digest = Some(digest.to_string());
     }
 
+    /// Return the target name supplied at construction time.
     pub fn target(&self) -> String {
         self.inner.lock().target.clone()
     }
 
+    /// Finalize the hash and return the hex-encoded BLAKE3 digest.
+    ///
+    /// If a digest was set manually via [`Writer::set_digest`], that value is
+    /// returned instead.
     pub async fn finish(&self) -> String {
         let lock = self.inner.lock();
         let hash = lock.hash.finalize();
