@@ -4,7 +4,7 @@
 
 The Transform component is the fourth and final core architectural pillar of Edo, responsible for converting input artifacts into output artifacts. It represents the actual build operations that process sources and dependent artifacts to produce built outputs. Transforms work with the **Storage**, **Source**, and **Environment** components — orchestrated by the `Context` (registry and configuration) and the `Scheduler` (DAG execution) — to provide a flexible and reproducible build pipeline.
 
-Transforms are declared in `edo.toml` under `[transform.<name>]` tables and dispatched by kind (`script`, `import`, `compose`) to either the builtin core plugin or a loaded WebAssembly Component Model plugin.
+Transforms are declared in `edo.toml` under `[transform.<name>]` tables and dispatched by kind (`script`, `import`, `compose`) to the builtin core plugin.
 
 ## 2. Core Responsibilities
 
@@ -273,7 +273,7 @@ workers = 8   # default; controls Graph batch_size / parallel transform fan-out
 
 ### 4.3 Builtin Transform Kinds
 
-Dispatched by `CorePlugin::supports` in `crates/plugins/edo-core-plugin/src/lib.rs`. Anything outside this table must be supplied by a wasm plugin.
+Dispatched by `CorePlugin::supports` in `crates/plugins/edo-core-plugin/src/lib.rs`.
 
 | Kind      | Source file                                     | Purpose                                                                        |
 | --------- | ----------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -314,11 +314,7 @@ Failure mode: script transforms always return `TransformStatus::Retryable(Some(l
 
 `ComposeTransform` has `depends` (list of `Addr`s) and optional `arch`. `environment()` returns `//default` and no commands are run; it hashes the dependency IDs, then concatenates their layers into a single artifact. Use it to stitch together per-component builds into a release payload.
 
-### 4.4 WebAssembly Plugin Contract
 
-The full WIT world is in `crates/edo-wit/{edo,host,abi}.wit` (note: `edo-wit` is not a Cargo crate — it is a pure WIT package referenced by `wasmtime::component::bindgen!` on the host and `wit-bindgen` on the guest). The guest-side defaults are in `crates/edo-plugin-sdk`, whose `Stub` provides no-op implementations that plugin authors override.
-
-Transform-relevant guest exports mirror the native trait shape (`environment`, `get-unique-id`, `depends`, `prepare`, `stage`, `transform`, `can-shell`, `shell`) with WIT equivalents for `Addr`, `Id`, `Artifact`, and `TransformStatus`. The host adapters that bridge WIT values to the native `TransformImpl` live in `crates/edo-core/src/plugin/impl_/transform.rs`.
 
 ## 5. Implementation Details
 
@@ -501,15 +497,11 @@ Notice the idioms this example exercises:
 
 ## 6. Security Considerations
 
-### 6.1 Plugin Isolation
-
-WebAssembly Component Model plugins run under `wasmtime` with only the host imports declared in `edo-wit`'s `host.wit`. Plugins cannot touch the host filesystem, network, or process environment outside of calls they make back through these imports.
-
-### 6.2 Input Validation
+### 6.1 Input Validation
 
 Transforms must validate their configuration in `FromNode::from_node` (via `Node::validate_keys` and typed accessors). Script commands are rendered through Handlebars — template variables are string-interpolated, so authors must treat dependency paths like any other shell input.
 
-### 6.3 Resource Limits
+### 6.2 Resource Limits
 
 Coarse parallelism is bounded by `[scheduler] workers`. Container-backed environments inherit the limits of the underlying container runtime. No per-transform CPU/memory/time quotas are enforced by Edo itself.
 
@@ -564,7 +556,7 @@ Testing for the Transform component focuses on:
 
 ### 9.1 Remote Execution
 
-Distribute transforms to remote workers, either by shipping a narrow subset of the environment farm interface over the network or by leveraging the wasm plugin surface to run farms out-of-process.
+Distribute transforms to remote workers by shipping a narrow subset of the environment farm interface over the network.
 
 ### 9.2 Enhanced Caching
 
@@ -580,4 +572,4 @@ Priority hints on `[transform.*]` entries, resource-aware worker pools (mirrorin
 
 ## 10. Conclusion
 
-The Transform component brings together Storage, Source, and Environment under the orchestration of `Context` (registry and configuration) and `Scheduler` (DAG execution). With three builtin kinds (`script`, `import`, `compose`), a narrow `Transform` trait, and a clear success/retryable/failed status contract, it provides the extensibility point through which both in-process and wasm plugins contribute build operations — preserving Edo's reproducibility guarantees through Merkle-hashed `Id`s and a shared build cache.
+The Transform component brings together Storage, Source, and Environment under the orchestration of `Context` (registry and configuration) and `Scheduler` (DAG execution). With three builtin kinds (`script`, `import`, `compose`), a narrow `Transform` trait, and a clear success/retryable/failed status contract, it provides the extensibility point through which plugins contribute build operations — preserving Edo's reproducibility guarantees through Merkle-hashed `Id`s and a shared build cache.

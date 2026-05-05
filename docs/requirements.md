@@ -77,16 +77,14 @@ A recurring challenge in software development is the need to produce portable bi
 
 ### 3.2 Extensibility Requirements
 
-- Must implement a WebAssembly-based plugin system using the WebAssembly Interface Types (WIT) specification
-- Must support plugins written in any language that compiles to WebAssembly
-- Must allow plugins to extend any of the core components:
+- Must implement a plugin system that allows extending any of the core components:
   - Storage Backends
   - Source providers
   - Environment implementations
   - Transform definitions
 - Must support runtime loading of plugins to ensure system flexibility
 - Must discover plugins through `[plugin.<name>]` tables declared in `edo.toml`
-- Must fetch plugin binaries (WebAssembly components) according to the source instructions in each `[plugin.<name>]` table
+- Must fetch plugin binaries according to the source instructions in each `[plugin.<name>]` table
 
 ### 3.3 Build Configuration Requirements
 
@@ -103,7 +101,7 @@ A recurring challenge in software development is the need to produce portable bi
 
 - Must support building in Docker containers
 - Must support building in the local environment
-- Must allow extension through WebAssembly plugins for custom environments
+- Must allow extension through plugins for custom environments
 - Must provide network isolation for container-based builds
 - Should allow optional network access for local builds
 
@@ -135,8 +133,8 @@ A recurring challenge in software development is the need to produce portable bi
 
 - Must support plugin declarations via `[plugin.<name>]` tables in `edo.toml`
 - Must resolve plugin sources through the standard source resolution mechanism
-- Must load and execute WebAssembly component plugins at runtime via the wasmtime host
-- Must enforce interface compliance through the WIT specification (`edo:plugin@1.0.0`)
+- Must load and execute plugins at runtime
+- Must enforce interface compliance through a well-defined plugin contract
 
 ## 5. Non-Functional Requirements
 
@@ -151,7 +149,7 @@ A recurring challenge in software development is the need to produce portable bi
 
 - Must enforce sandboxing for non-local build environments
 - Must provide network isolation for container-based builds
-- Should implement appropriate security models for the WebAssembly plugin system
+- Should implement appropriate security models for the plugin system
 
 ### 5.3 Usability
 
@@ -205,5 +203,4 @@ Plugin lifecycle is declarative rather than imperative: plugins are declared in 
 ## 8. Implementation Constraints
 
 - Must be implemented in Rust programming language
-- Must use the WebAssembly Component Model for plugin extensibility
 - Must use TOML (`edo.toml`, `schema-version = "1"`) for build configuration files

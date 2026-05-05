@@ -37,13 +37,13 @@ All versions live in `[workspace.dependencies]` in the root `Cargo.toml`; indivi
 | `semver`              | Version parsing (source resolver).                               |
 | `regex`               | Parsing helpers.                                                 |
 
-## WebAssembly (Plugin System)
+## Plugin System
 
 | Crate           | Where | Role                                                                   |
 | --------------- | ----- | ---------------------------------------------------------------------- |
-| `wasmtime` 44   | host  | Component model runtime. `wasmtime::component::bindgen!` on `edo.wit`. |
+| `wasmtime` 44   | host  | Plugin runtime engine.                                                 |
 | `wasmtime-wasi` | host  | WASI support for guest plugins.                                        |
-| `wit-bindgen`   | guest | Used by `edo-plugin-sdk` to generate `bindings.rs`.                    |
+| `wit-bindgen`   | guest | Used by `edo-plugin-sdk` to generate plugin bindings.                  |
 
 ## Storage / Artifacts / I/O
 
@@ -98,7 +98,7 @@ graph LR
     edo --> edo_core
     edo --> edo_core_plugin
     edo_core_plugin --> edo_core
-    edo_plugin_sdk -.WIT only.-> edo_wit[edo-wit<br/>not a crate]
+    edo_plugin_sdk -.plugin contract.-> edo_wit[edo-wit<br/>not a crate]
     edo_core -.bindgen!.-> edo_wit
 ```
 

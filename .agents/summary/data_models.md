@@ -33,7 +33,7 @@ Every table entry is translated into a `Node` definition via `toml_def_item` (se
 
 ## `Node` — Generic Data Tree
 
-Defined in `crates/edo-core/src/context/node.rs` (and mirrored as a resource in `host.wit`).
+Defined in `crates/edo-core/src/context/node.rs` (and mirrored as a resource in the plugin interface).
 
 Carries either a raw value or a "definition" (`record definition { id, kind, name, table }`). Accessors:
 
@@ -119,7 +119,7 @@ pub enum TransformStatus {
 }
 ```
 
-Crosses the wasm boundary as `variant transform-status` (see `host.wit`). `Option<PathBuf>` is an optional path hint for the failed working directory.
+Maps to a `variant transform-status` in the plugin interface. `Option<PathBuf>` is an optional path hint for the failed working directory.
 
 ## Lock File
 

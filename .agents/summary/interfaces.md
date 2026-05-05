@@ -21,7 +21,7 @@ Subcommands:
   list                                   List transforms/addresses
 ```
 
-`--arg K=V` pairs become the `variables` `HashMap<String, String>` threaded through `Context::init`; transforms retrieve them via `context.get_arg(name)` (see `host.wit::context.get-arg`).
+`--arg K=V` pairs become the `variables` `HashMap<String, String>` threaded through `Context::init`; transforms retrieve them via `context.get_arg(name)`.
 
 ## Project Manifest (`edo.toml`) Interface
 
@@ -35,7 +35,7 @@ Sections (all TOML tables, keyed by logical name → becomes an address like `//
 | `[cache.source.*]`  | e.g. `s3`                                   | Registers source caches in `Storage`.            |
 | `[cache.build]`     | `s3`                                        | Optional single build cache.                     |
 | `[cache.output]`    | `s3`                                        | Optional single output cache.                    |
-| `[plugin.<n>]`      | wasm plugin definitions                     | Loaded as `WasmPlugin`.                          |
+| `[plugin.<n>]`      | plugin definitions                          | Loaded as a `Plugin`.                            |
 | `[environment.<n>]` | `local`, `container`                        | Registers a `Farm`.                              |
 | `[source.<n>]`      | `local`, `git`, `remote`, `image`, `vendor` | Registers a `Source`.                            |
 | `[transform.<n>]`   | `compose`, `import`, `script`               | Registers a `Transform`.                         |
@@ -97,7 +97,7 @@ trait Transform {
 
 ### `Backend`
 
-See `edo-core/src/storage/backend.rs`. Methods mirror `abi.wit::backend`: `ls`, `has`, `open`, `save`, `del`, `copy`, `prune`, `prune_all`, `read`, `start_layer`, `finish_layer`.
+See `edo-core/src/storage/backend.rs`. Methods: `ls`, `has`, `open`, `save`, `del`, `copy`, `prune`, `prune_all`, `read`, `start_layer`, `finish_layer`.
 
 ### `Plugin` / `PluginImpl`
 
@@ -115,42 +115,9 @@ trait Plugin {
 }
 ```
 
-## WebAssembly Plugin Interface (WIT)
-
-Package: `edo:plugin@1.0.0` in `crates/edo-wit/`.
-
-**World** (`edo.wit`):
-
-```wit
-world edo {
-    use host.{node, error};
-    import host;
-    export abi;
-}
-```
-
-**Guest exports** (`abi.wit::abi`): resources `backend`, `environment`, `farm`, `source`, `transform`, `vendor` + five `create-*` factories + a `supports(component, kind) -> bool` predicate.
-
-**Host imports** (`host.wit::host`): resources `reader`, `writer`, `id`, `layer`, `artifact`, `artifact-config`, `storage`, `config`, `log`, `command`, `environment`, `source`, `handle`, `context`, `farm`, `transform`, `node`, `error`; helpers `info` / `warn` / `fatal`; variant `transform-status { success(artifact), retryable(tuple<option<string>, error>), failed(tuple<option<string>, error>) }`; enum `component { storage-backend, environment, source, transform, vendor }`.
-
-Two things cross the boundary as **first-class resources** that are easy to miss:
-
-1. `command` — a host-owned scriptable build command (`chdir`/`pushd`/`popd`/`create-dir`/`copy`/`run`/`send`/…). Obtained from `environment.defer-cmd(log, id)`.
-2. `node` — a generic TOML-like data tree with `as-bool`/`as-int`/`as-string`/`as-list`/`as-table`/`get-id`/`get-kind`/`get-name`/`validate-keys`. All plugin factories receive one of these for their section.
-
 ## Plugin Authoring (Guest Side)
 
-Depend on `edo-plugin-sdk`, then:
-
-```rust
-use edo_plugin_sdk::bindings::exports::edo::plugin::abi;
-use edo_plugin_sdk::stub::Stub;
-
-impl abi::GuestSource for MyThing { /* ... */ }
-// Use Stub as a default for any Guest* trait you don't need to implement.
-```
-
-`wit-bindgen` generates the trait set from `crates/edo-wit/*.wit`.
+Depend on `edo-plugin-sdk`, then implement the relevant `Guest*` traits. Use `Stub` as a default for any trait you don't need to implement.
 
 ## Addressing Scheme
 

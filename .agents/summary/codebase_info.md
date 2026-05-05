@@ -12,8 +12,7 @@
 
 - **Primary language**: Rust (edition 2024, requires Rust ≥ 1.86)
 - **Runtime concurrency**: `tokio` (full feature set), `parking_lot`, `dashmap`
-- **WebAssembly host**: `wasmtime` + `wasmtime-wasi` (component model)
-- **Guest-side bindings**: `wit-bindgen`
+- **Plugin system**: plugin host for extensibility
 - **Project config format**: TOML (`edo.toml`, `schema-version = "1"`)
 - **Lock format**: JSON (`edo.lock.json`)
 - **OCI interop**: `ocilot` (git dep), `astral-tokio-tar`, `async-compression`
@@ -34,7 +33,7 @@ graph TB
     WS --> CORE[crates/edo-core<br/>engine library]
     WS --> SDK[crates/edo-plugin-sdk<br/>guest-side SDK]
     WS --> COREP[crates/plugins/edo-core-plugin<br/>builtin plugin impls]
-    WIT[crates/edo-wit<br/>WIT definitions only]:::note
+    WIT[crates/edo-wit<br/>plugin interface definitions]:::note
     EX[examples/<br/>hello_rust, hello_oci]:::note
     DOCS[docs/<br/>design + per-component]:::note
 
@@ -42,14 +41,14 @@ graph TB
     EDO --> COREP
     COREP --> CORE
     SDK -. uses .-> WIT
-    CORE -. embeds .-> WIT
+    CORE -. references .-> WIT
 
     classDef note fill:#eef,stroke:#88a;
 ```
 
 Notes:
 
-- `crates/edo-wit` is not a Cargo crate (no `Cargo.toml`); it is a pure WIT package consumed via `wasmtime::component::bindgen!` by the host and `wit-bindgen` by the SDK.
+- `crates/edo-wit` is not a Cargo crate (no `Cargo.toml`); it contains the plugin interface definitions consumed by both the host and the SDK.
 - `default-members = ["crates/edo"]` — plain `cargo build` builds the CLI only.
 - `examples/` is excluded from the workspace.
 
@@ -68,9 +67,9 @@ Notes:
 - `crates/edo-core/src/environment/` — `Environment` and `Farm` traits + deferred `Command` builder.
 - `crates/edo-core/src/transform/` — `Transform` trait and `TransformStatus`.
 - `crates/edo-core/src/scheduler/` — DAG-based parallel execution engine.
-- `crates/edo-core/src/plugin/` — wasmtime host, bindings bridge, `WasmPlugin`, per-resource adapters in `impl_/`.
+- `crates/edo-core/src/plugin/` — plugin host, bindings bridge, per-resource adapters in `impl_/`.
 - `crates/edo-core/src/util/` — shared async `Reader`/`Writer`, fs/command/sync helpers.
-- `crates/plugins/edo-core-plugin/src/` — in-process builtin plugin that implements `PluginImpl` directly (does NOT use wasm) and supplies: `s3` storage; `local`/`container` farms; `git`/`local`/`image`/`remote`/`vendor` sources; `compose`/`import`/`script` transforms; `image` vendor.
+- `crates/plugins/edo-core-plugin/src/` — in-process builtin plugin that implements `PluginImpl` directly and supplies: `s3` storage; `local`/`container` farms; `git`/`local`/`image`/`remote`/`vendor` sources; `compose`/`import`/`script` transforms; `image` vendor.
 
 ## Supported / Unsupported Kinds (from `core_plugin.supports`)
 
@@ -82,7 +81,7 @@ Notes:
 | Transform      | `compose`, `import`, `script`               |
 | Vendor         | `image`                                     |
 
-Anything outside this set must be supplied by a WebAssembly plugin loaded through `WasmPlugin`.
+Anything outside this set must be supplied by a plugin.
 
 ## Entry Points
 

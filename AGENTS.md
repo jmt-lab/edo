@@ -4,7 +4,7 @@ A starting point for AI agents navigating this repository. For deeper topic-leve
 
 ## What Edo Is
 
-Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggable abstractions — **Storage, Source, Environment, Transform** — orchestrated by a `Context` + `Scheduler`. Extensibility via in-process plugins or WebAssembly Component Model plugins (`wasmtime` host, `wit-bindgen` guest).
+Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggable abstractions — **Storage, Source, Environment, Transform** — orchestrated by a `Context` + `Scheduler`. Extensibility via an in-process plugin system.
 
 ## Repository Map
 
@@ -31,13 +31,10 @@ Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggabl
     │       ├── environment/# Environment, Farm, Command (deferred)
     │       ├── transform/  # Transform trait + TransformStatus
     │       ├── scheduler/  # DAG executor (Graph, execute, workers)
-    │       ├── plugin/     # wasmtime host + adapters (impl_/*) + bindings
+    │       ├── plugin/     # plugin host + adapters (impl_/*) + bindings
     │       └── util/       # Reader/Writer/fs/cmd/sync helpers
-    ├── edo-plugin-sdk/     # guest-side SDK (wit-bindgen + Stub defaults)
-    ├── edo-wit/            # WIT package (NOT a Cargo crate — pure .wit)
-    │   ├── edo.wit         # world edo
-    │   ├── host.wit        # host imports
-    │   └── abi.wit         # guest exports
+    ├── edo-plugin-sdk/     # guest-side SDK (Stub defaults)
+    ├── edo-wit/            # plugin interface definitions (NOT a Cargo crate)
     └── plugins/
         └── edo-core-plugin/# builtin in-process plugin
             └── src/        # storage/s3, environment/{local,container},
@@ -56,13 +53,12 @@ Runtime artefacts (gitignored): `.edo/` (engine working dir + local cache), `edo
 | TOML schema (v1)       | `crates/edo-core/src/context/schema.rs`                         |
 | Project loader         | `crates/edo-core/src/context/builder.rs` (`Project`)            |
 | DAG scheduler          | `crates/edo-core/src/scheduler/{mod,graph,execute}.rs`          |
-| Plugin host (wasm)     | `crates/edo-core/src/plugin/{mod,host,bindings}.rs` + `impl_/*` |
+| Plugin host            | `crates/edo-core/src/plugin/{mod,host,bindings}.rs` + `impl_/*` |
 | Builtin kinds dispatch | `crates/plugins/edo-core-plugin/src/lib.rs::CorePlugin`         |
-| WIT contract           | `crates/edo-wit/{edo,host,abi}.wit`                             |
 
 ## Supported Builtin Kinds
 
-Driven by `CorePlugin::supports` in `crates/plugins/edo-core-plugin/src/lib.rs`. Anything outside this table must ship as a wasm plugin.
+Driven by `CorePlugin::supports` in `crates/plugins/edo-core-plugin/src/lib.rs`.
 
 | Component       | Kinds                                       |
 | --------------- | ------------------------------------------- |
@@ -87,7 +83,7 @@ Registry keys use `Addr::parse`. Conventions:
 - **`non_configurable!` macro**: Short-hand for `FromNodeNoContext` impls on types that take no config.
 - **`transform_err!` macro** (`edo-core/src/transform/mod.rs`): Use inside `fn transform(...) -> TransformStatus` instead of `?` — it converts `Result::Err` into `TransformStatus::Failed` with logging.
 - **Handlebars templating** in `ScriptTransform.commands`. Known variables from examples: `{{install-root}}`, `{{build-root}}`. Read `crates/plugins/edo-core-plugin/src/transform/script.rs` for the full set.
-- **`edo-wit` is NOT in the workspace members list**. It has no `Cargo.toml`. Host resolves it via `wasmtime::component::bindgen!` path; guest via `wit-bindgen`. Treat it as source-of-truth for the plugin contract.
+- **`edo-wit` is NOT in the workspace members list**. It has no `Cargo.toml`. Treat it as source-of-truth for the plugin contract.
 - **`examples/` is `exclude`d** from the workspace — `cargo build` from the root will not touch it.
 - **`default-members = ["crates/edo"]`** — plain `cargo build` / `cargo run` only builds the CLI crate. Use `-p <crate>` or `--workspace` to touch everything.
 - **`#[snafu::report]` on `main`** — panics/errors get formatted reports; individual error enums use `#[snafu(transparent)]` heavily to bubble `?` across subsystem boundaries.
@@ -115,7 +111,7 @@ Deeper topic docs (regenerable via the `codebase-summary` SOP):
 - `.agents/summary/index.md` — knowledge base entry point & routing table
 - `.agents/summary/architecture.md` — how everything fits together
 - `.agents/summary/components.md` — per-file reference
-- `.agents/summary/interfaces.md` — CLI, TOML schema, traits, WIT
+- `.agents/summary/interfaces.md` — CLI, TOML schema, traits
 - `.agents/summary/data_models.md` — Node, Addr, Artifact, Lock, errors
 - `.agents/summary/workflows.md` — run/checkout/update sequences
 - `.agents/summary/dependencies.md` — external crates and their roles

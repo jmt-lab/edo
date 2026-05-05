@@ -2,7 +2,7 @@
 
 ## High-Level Architecture
 
-Edo is built around four pluggable abstractions — **Storage**, **Source**, **Environment**, **Transform** — orchestrated by a **Context** and executed by a **Scheduler**. Extensibility is delivered through a **Plugin system** that exposes each abstraction across a WebAssembly Component Model boundary.
+Edo is built around four pluggable abstractions — **Storage**, **Source**, **Environment**, **Transform** — orchestrated by a **Context** and executed by a **Scheduler**. Extensibility is delivered through a **Plugin system** that exposes each abstraction through a well-defined plugin boundary.
 
 ```mermaid
 graph TB
@@ -16,7 +16,6 @@ graph TB
     Ctx --> Transforms[Transforms]
 
     Plugins -->|in-process| CorePlugin[edo-core-plugin<br/>builtin]
-    Plugins -->|wasmtime| Wasm[WasmPlugin<br/>*.wasm components]
 
     Sched --> Transforms
     Transforms --> Farms
@@ -28,7 +27,7 @@ graph TB
 
 ## Core Abstractions (traits in `edo-core`)
 
-All four abstractions use the `arc_handle` crate macro, which generates a newtype handle around `Arc<dyn Trait>` so the same handle type is used whether the implementation is the in-process core plugin or a wasm guest.
+All four abstractions use the `arc_handle` crate macro, which generates a newtype handle around `Arc<dyn Trait>` so the same handle type is used regardless of the underlying plugin implementation.
 
 | Trait         | Location                           | Role                                                                          |
 | ------------- | ---------------------------------- | ----------------------------------------------------------------------------- |
@@ -68,35 +67,11 @@ graph LR
 
 Storage exposes `safe_open` / `safe_read` / `fetch_source` etc. and synchronizes remote-cached artifacts into the local backend before use. The only builtin non-local backend is `s3`.
 
-## Plugin / Wasm Boundary
+## Plugin Boundary
 
-Plugins are expressed as WIT packages in `crates/edo-wit/`:
+Plugins implement the `Plugin` trait (via `PluginImpl`) and are registered in `Context`. The builtin `edo-core-plugin` is an in-process implementation that dispatches by `kind`. The adapter layer in `crates/edo-core/src/plugin/impl_/` (one file per resource: `backend`, `environment`, `farm`, `handle`, `source`, `transform`, `vendor`) bridges plugin implementations to the native `edo-core` traits.
 
-- `edo.wit` — top-level `world edo` that `import host` + `export abi`.
-- `host.wit` — host-provided resources (`storage`, `environment`, `command`, `log`, `id`, `artifact`, `node`, `context`, `config`, `handle`, `reader`/`writer`, etc.) plus `component`, `transform-status`, `error`.
-- `abi.wit` — guest exports (resources `backend`, `environment`, `farm`, `source`, `transform`, `vendor` + `create-*` factories).
-
-```mermaid
-sequenceDiagram
-    participant Ctx as Context
-    participant Plugin as WasmPlugin
-    participant Wasmtime as wasmtime runtime
-    participant Guest as Guest .wasm
-    Ctx->>Plugin: create_transform(addr, node, ctx)
-    Plugin->>Wasmtime: call abi.create-transform(...)
-    Wasmtime->>Guest: invoke export
-    Guest-->>Wasmtime: transform resource handle
-    Wasmtime-->>Plugin: Resource<Transform>
-    Plugin-->>Ctx: Transform (PluginTransform adapter)
-    Ctx->>Plugin: transform.get_unique_id(handle)
-    Plugin->>Wasmtime: call on guest resource
-    Wasmtime->>Guest: resource method
-    Note over Guest,Wasmtime: Guest may call back into host<br/>(storage, log, command builder, ...)
-```
-
-Adapter layer lives in `crates/edo-core/src/plugin/impl_/` (one file per guest resource: `backend`, `environment`, `farm`, `handle`, `source`, `transform`, `vendor`). These adapters implement the native `edo-core` traits and forward to the guest via wasmtime resource handles.
-
-The guest side is supported by `crates/edo-plugin-sdk/` which wraps `wit-bindgen` output (`bindings.rs`) and provides a `Stub` with "not implemented" defaults so plugin authors can implement only the resources they need.
+The guest side is supported by `crates/edo-plugin-sdk/` which provides a `Stub` with "not implemented" defaults so plugin authors can implement only the resources they need.
 
 ## Scheduling
 
@@ -115,7 +90,7 @@ Everything registered in a `Context` is keyed by a hierarchical address, parsed 
 
 - Every subsystem defines a typed `*Error` enum with `snafu`.
 - `main.rs` aggregates them via `#[snafu(transparent)]` variants and uses `#[snafu::report]` to print.
-- Plugin errors cross the wasm boundary as guest-owned `error` resources with `to-string`.
+- Plugin errors are surfaced through guest-owned `error` resources with `to-string`.
 
 ## Known Design / Docs Divergences
 

@@ -16,7 +16,7 @@ classDiagram
         +Source, Vendor
         +Environment, Farm
         +Transform
-        +Plugin, WasmPlugin
+        +Plugin
         +Scheduler
     }
     class edo_core_plugin {
@@ -29,14 +29,14 @@ classDiagram
         +ImageVendor
     }
     class edo_plugin_sdk {
-        +bindings (wit-bindgen)
+        +bindings
         +Stub (default impls)
         +error
     }
     edo --> edo_core
     edo --> edo_core_plugin
     edo_core_plugin --> edo_core
-    edo_plugin_sdk ..> edo_core : WIT contract
+    edo_plugin_sdk ..> edo_core : plugin contract
 ```
 
 ## `crates/edo` — CLI
@@ -126,11 +126,11 @@ Worker count: `[scheduler] workers = <int>` in config, default 8.
 
 | File                                                                             | Role                                                                                                                                                          |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`                                                                         | `Plugin` (`arc_handle` trait), `WasmPlugin`, in-process `PluginImpl` trait.                                                                                   |
-| `bindings.rs`                                                                    | `wasmtime::component::bindgen!` output for `edo:plugin`.                                                                                                      |
+| `mod.rs`                                                                         | `Plugin` (`arc_handle` trait), in-process `PluginImpl` trait.                                                                                   |
+| `bindings.rs`                                                                    | Plugin bindings.                                                                                                                                              |
 | `host.rs`                                                                        | Host-side resource implementations (storage/log/command/node/...).                                                                                            |
 | `impl_/`                                                                         | Adapters that make guest resources look like native traits: `backend.rs`, `environment.rs`, `farm.rs`, `handle.rs`, `source.rs`, `transform.rs`, `vendor.rs`. |
-| `environment.rs`, `source.rs`, `storage.rs`, `transform.rs`, `log.rs`, `node.rs` | Host-facing wrappers exposed across the boundary.                                                                                                             |
+| `environment.rs`, `source.rs`, `storage.rs`, `transform.rs`, `log.rs`, `node.rs` | Host-facing wrappers exposed across the plugin boundary.                                                                                                      |
 | `error.rs`                                                                       | `PluginError`, `GuestError`.                                                                                                                                  |
 
 ### `util/`
@@ -139,7 +139,7 @@ Async `Reader` / `Writer`, `fs` helpers, `command` helpers, `sync` helpers (used
 
 ## `crates/plugins/edo-core-plugin` — Builtin Plugin
 
-In-process `PluginImpl` (not wasm). Dispatches in `CorePlugin::supports` / `create_*` by matching `node.get_kind()`.
+In-process `PluginImpl`. Dispatches in `CorePlugin::supports` / `create_*` by matching `node.get_kind()`.
 
 | Sub-module                 | Provides                                                                                            |
 | -------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -158,11 +158,11 @@ In-process `PluginImpl` (not wasm). Dispatches in `CorePlugin::supports` / `crea
 
 ## `crates/edo-plugin-sdk` — Guest SDK
 
-For authoring third-party wasm plugins. Re-exports `bindings` (wit-bindgen) and supplies `stub::Stub` that implements every `Guest*` trait with `NotImplemented` errors so you can `impl GuestSource for MyThing` and let the rest default.
+For authoring third-party plugins. Re-exports `bindings` and supplies `stub::Stub` that implements every `Guest*` trait with `NotImplemented` errors so you can `impl GuestSource for MyThing` and let the rest default.
 
-## `crates/edo-wit` — WIT Package
+## `crates/edo-wit` — Plugin Interface Definitions
 
-Three files: `edo.wit` (world), `host.wit` (host imports), `abi.wit` (guest exports). Consumed by both `edo-core` (host) and `edo-plugin-sdk` (guest). Package name: `edo:plugin@1.0.0`.
+Three files: `edo.wit`, `host.wit`, `abi.wit`. Consumed by both `edo-core` (host) and `edo-plugin-sdk` (guest).
 
 ## Examples (`examples/`)
 

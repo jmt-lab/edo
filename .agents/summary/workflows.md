@@ -105,19 +105,12 @@ cache(log, storage):
 ```mermaid
 sequenceDiagram
     participant Ctx as Context
-    participant P as Plugin (Wasm or Core)
-    participant G as Guest resource
+    participant P as Plugin (Core)
     Ctx->>P: supports(Component::Transform, "script")
     P-->>Ctx: true
     Ctx->>P: create_transform(addr, node, ctx)
-    alt WasmPlugin
-        P->>G: wasmtime call abi.create-transform
-        G-->>P: Resource<transform>
-        P-->>Ctx: Transform(PluginTransform adapter)
-    else CorePlugin (in-process)
-        P->>P: match node.kind -> ScriptTransform::from_node(...)
-        P-->>Ctx: Transform(ScriptTransform)
-    end
+    P->>P: match node.kind -> ScriptTransform::from_node(...)
+    P-->>Ctx: Transform(ScriptTransform)
 ```
 
 ## 7. ScriptTransform Execution Detail

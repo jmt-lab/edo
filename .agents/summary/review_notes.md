@@ -41,15 +41,15 @@ Per-component design docs (`docs/components/{storage,source,environment,transfor
 
 ### B. `edo-wit` is not a Cargo crate
 
-The `edo-wit` directory contains only `.wit` files and no `Cargo.toml`. It is neither a workspace member nor exclude'd. This currently works because both the host (`bindgen!`) and the SDK (`wit-bindgen`) resolve WIT files by relative path, but it is an undocumented convention that could bite future contributors.
+The `edo-wit` directory contains only interface definition files and no `Cargo.toml`. It is neither a workspace member nor exclude'd. This is an undocumented convention that could bite future contributors.
 
 ### C. CI / test commands unknown
 
 No `.github/workflows/`, no `Makefile`, no `justfile`, no `rust-toolchain.toml`, no obvious test harness notes. Standard `cargo build`, `cargo test`, `cargo clippy`, `cargo deny check` are presumed but unverified against a hypothetical CI matrix.
 
-### D. Wasm plugin authoring has no end-to-end example
+### D. Plugin authoring has no end-to-end example
 
-`edo-plugin-sdk` exists with `bindings.rs` + `Stub`, but there is no example `.wasm` plugin or integration test in the repository, and no documentation explaining which target (`wasm32-wasip2` for component model) to compile to.
+`edo-plugin-sdk` exists with `bindings.rs` + `Stub`, but there is no example plugin or integration test in the repository.
 
 ### E. ScriptTransform variable substitution not documented
 
@@ -61,7 +61,7 @@ The reserved addresses `//edo-local-cache`, `//edo-source-cache/<name>`, `//edo-
 
 ## Language-Support Limitations (of this pass)
 
-This summary was produced entirely from Rust sources, TOML configs, WIT definitions, and Markdown docs. No other languages are in-tree, so there are no gaps from language limitations — with the caveat that guest-side plugin authoring could target **any language that compiles to a WebAssembly Component**, and such integrations are not represented in this repo.
+This summary was produced entirely from Rust sources, TOML configs, interface definitions, and Markdown docs. No other languages are in-tree, so there are no gaps from language limitations.
 
 ## Recommendations
 
@@ -69,5 +69,5 @@ This summary was produced entirely from Rust sources, TOML configs, WIT definiti
 2. Replace README TODOs with at minimum a pointer to the examples and to `edo-core-plugin` for "which transform kinds exist".
 3. Either fix or remove the `hello_oci` example, or add a prominent banner in its `edo.toml`.
 4. Document reserved storage addresses, Handlebars variables, and the `--arg` flow in one place.
-5. Publish a minimal wasm plugin example under `examples/` or a new `plugins/` directory so `edo-plugin-sdk` has a real user.
-6. Consider adding `crates/edo-wit` as a workspace member with a `Cargo.toml` containing a `build.rs` that validates WIT on build.
+5. Publish a minimal plugin example under `examples/` or a new `plugins/` directory so `edo-plugin-sdk` has a real user.
+6. Consider adding `crates/edo-wit` as a workspace member with a `Cargo.toml` containing a `build.rs` that validates interface definitions on build.
