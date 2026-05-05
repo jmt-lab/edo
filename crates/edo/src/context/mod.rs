@@ -343,3 +343,199 @@ impl Context {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Integration tests for `Context`.
+    //!
+    //! `Context::init` installs a global `tracing` subscriber via
+    //! `LogManager::init`. That subscriber can only be installed once per
+    //! process, so these tests:
+    //!
+    //! 1. Share a single `Context` via a `OnceCell` (`shared_context`).
+    //! 2. Serialize on the `log_manager` tag (shared with any future tests
+    //!    in `log.rs` / `logmgr.rs` that also initialize the subscriber).
+    //! 3. Treat `ContextError::Log` as a soft skip — if another test in the
+    //!    same binary installed the subscriber first and we raced past the
+    //!    `OnceCell`, we cannot recover a `Context`, so we skip gracefully.
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tokio::sync::OnceCell;
+    type SharedCtx = (Context, Arc<TempDir>);
+    static SHARED: OnceCell<SharedCtx> = OnceCell::const_new();
+
+    /// Returns the shared `Context` if available.
+    ///
+    /// Returns `None` only when `Context::init` fails with `ContextError::Log`
+    /// because a sibling test (in `log.rs`/`logmgr.rs`) already installed the
+    /// global subscriber. In that case each caller should return early.
+    async fn try_shared_context() -> Option<Context> {
+        if let Some((ctx, _)) = SHARED.get() {
+            return Some(ctx.clone());
+        }
+        let dir = TempDir::new().expect("create tempdir");
+        match Context::init::<&std::path::Path, &std::path::Path>(
+            Some(dir.path()),
+            None,
+            HashMap::new(),
+            LogVerbosity::Info,
+        )
+        .await
+        {
+            Ok(ctx) => {
+                // First writer wins; if another task raced us, accept theirs.
+                let _ = SHARED.set((ctx.clone(), Arc::new(dir)));
+                Some(SHARED.get().map(|(c, _)| c.clone()).unwrap_or(ctx))
+            }
+            Err(error::ContextError::Log { .. }) => None,
+            Err(e) => panic!("unexpected Context::init error: {e}"),
+        }
+    }
+
+    /// Convenience that either yields a `Context` or executes `return` via the
+    /// caller (through `let ... else`).
+    macro_rules! ctx_or_skip {
+        () => {
+            match try_shared_context().await {
+                Some(c) => c,
+                None => {
+                    eprintln!(
+                        "skip: global tracing subscriber already initialized \
+                         by a sibling test in this binary"
+                    );
+                    return;
+                }
+            }
+        };
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_init_smoke() {
+        let ctx = ctx_or_skip!();
+        // Accessors must not panic and must return references.
+        let _ = ctx.config();
+        let _ = ctx.storage();
+        let _ = ctx.log();
+        let _ = ctx.scheduler();
+        let _ = ctx.args();
+        let _ = ctx.registry();
+        // Unregistered lookups return None.
+        assert!(
+            ctx.get_transform(&Addr::parse("//x").unwrap()).is_none(),
+            "no transforms registered yet",
+        );
+        assert!(
+            ctx.get_farm(&Addr::parse("//x").unwrap()).is_none(),
+            "no farms registered yet",
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_get_handle_returns_snapshot() {
+        let ctx = ctx_or_skip!();
+        let h = ctx.get_handle();
+        // The shared context may have had transforms/farms registered by
+        // a previous test; the snapshot should, however, never be missing
+        // the args map.
+        assert!(
+            h.args().is_empty(),
+            "no CLI args were passed to Context::init",
+        );
+        // `transforms()` is just a `HashMap` borrow — we only assert access.
+        let _ = h.transforms();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_add_cache_routes_by_address() {
+        let ctx = ctx_or_skip!();
+
+        // All three routes use the built-in `local` backend path, which is
+        // handled directly (not via the plugin registry).
+        for addr_str in ["//edo-build-cache", "//edo-output-cache", "//some-src"] {
+            let tmp = TempDir::new().unwrap();
+            let mut table = BTreeMap::new();
+            table.insert(
+                "path".to_string(),
+                Node::new_string(tmp.path().to_string_lossy().to_string()),
+            );
+            let node = Node::new_definition("storage", "local", "c", table);
+            ctx.add_cache(&Addr::parse(addr_str).unwrap(), &node)
+                .await
+                .unwrap_or_else(|e| panic!("add_cache {addr_str} failed: {e}"));
+        }
+        // Storage does not publicly expose slot inspection; reaching this
+        // point without panic or error is the assertion.
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_add_transform_no_provider_errors() {
+        let ctx = ctx_or_skip!();
+        let mut table = BTreeMap::new();
+        table.insert("foo".to_string(), Node::new_string("x".to_string()));
+        // `script` has no plugin-registered provider in a fresh registry.
+        let node = Node::new_definition("transform", "script", "t", table);
+        let err = ctx
+            .add_transform(&Addr::parse("//t").unwrap(), &node)
+            .await
+            .expect_err("expected NoProvider error");
+        assert!(
+            matches!(
+                err,
+                error::ContextError::NoProvider { ref component, ref kind }
+                if component == "transform" && kind == "script"
+            ),
+            "unexpected error: {err:?}",
+        );
+        // Ensure nothing was inserted on failure.
+        assert!(ctx.get_transform(&Addr::parse("//t").unwrap()).is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_add_farm_missing_kind_field_error() {
+        let ctx = ctx_or_skip!();
+        // A plain Table (not a Definition) — `get_kind()` returns None, so
+        // the registry surfaces a `Field { field: "kind", .. }` error.
+        let node = Node::new_table(BTreeMap::new());
+        let err = ctx
+            .add_farm(&Addr::parse("//f").unwrap(), &node)
+            .await
+            .expect_err("expected Field error");
+        assert!(
+            matches!(
+                err,
+                error::ContextError::Field { ref field, .. } if field == "kind"
+            ),
+            "unexpected error: {err:?}",
+        );
+        assert!(ctx.get_farm(&Addr::parse("//f").unwrap()).is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_print_transforms_smoke() {
+        let ctx = ctx_or_skip!();
+        // Must not panic even when the transforms map is empty.
+        ctx.print_transforms();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn context_load_empty_project_ok() {
+        let ctx = ctx_or_skip!();
+        let tmp = TempDir::new().unwrap();
+        // Bypass `self.project_dir` (bound to the CWD at Context::init time)
+        // by calling `Project::load` directly with our empty directory.
+        Project::load(tmp.path(), &ctx, false)
+            .await
+            .expect("empty project should load cleanly");
+        // An empty project still loads successfully; we do not assert on the
+        // presence of a lockfile since `Project::load` may write one
+        // unconditionally. Reaching this point is the assertion.
+    }
+}

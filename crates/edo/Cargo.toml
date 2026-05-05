@@ -52,3 +52,6 @@ tracing-subscriber = { workspace = true }
 url                = { workspace = true }
 uuid               = { workspace = true }
 which              = { workspace = true }
+
+[dev-dependencies]
+serial_test = { workspace = true }

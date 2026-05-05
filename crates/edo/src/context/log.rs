@@ -95,3 +95,86 @@ impl IntoRawFd for &Log {
         file.into_raw_fd()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Log;
+    use crate::context::logmgr::test_support::shared_log_manager;
+    use std::io::Write;
+    use std::os::fd::{FromRawFd, IntoRawFd};
+    use tempfile::TempDir;
+
+    /// Helper: create a `Log` at `<dir>/<name>.log` using the shared manager.
+    async fn make_log(dir: &TempDir, name: &str) -> Log {
+        let mgr = shared_log_manager().await;
+        let path = dir.path().join(format!("{name}.log"));
+        Log::new(&mgr, &path).expect("Log::new")
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn log_path_returns_passed_path() {
+        let dir = TempDir::new().unwrap();
+        let expected = dir.path().join("x.log");
+        let log = make_log(&dir, "x").await;
+        assert_eq!(log.path(), expected);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn log_name_returns_file_name() {
+        let dir = TempDir::new().unwrap();
+        let log = make_log(&dir, "x").await;
+        assert_eq!(log.log_name(), "x.log");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn set_subject_writes_header() {
+        let dir = TempDir::new().unwrap();
+        let log = make_log(&dir, "subj").await;
+        log.set_subject("build");
+        // Flush via the Write impl to ensure bytes are on disk.
+        let mut clone = log.clone();
+        clone.flush().unwrap();
+        let contents = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            contents.contains("------ build ------"),
+            "unexpected contents: {contents:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn write_appends_bytes() {
+        let dir = TempDir::new().unwrap();
+        let mut log = make_log(&dir, "write").await;
+        log.write_all(b"hello").unwrap();
+        log.write_all(b" world").unwrap();
+        log.flush().unwrap();
+        let contents = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            contents.ends_with("hello world"),
+            "unexpected contents: {contents:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn flush_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let mut log = make_log(&dir, "flush").await;
+        log.flush().unwrap();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn into_raw_fd_returns_non_negative() {
+        let dir = TempDir::new().unwrap();
+        let log = make_log(&dir, "rawfd").await;
+        let fd = (&log).into_raw_fd();
+        assert!(fd >= 0, "expected non-negative fd, got {fd}");
+        // Wrap in a File so the descriptor is properly closed.
+        let _ = unsafe { std::fs::File::from_raw_fd(fd) };
+    }
+}

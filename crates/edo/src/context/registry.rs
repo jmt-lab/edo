@@ -57,7 +57,7 @@ impl Registry {
         })?;
         let constructor = self.backends.get(&kind).context(error::NoProviderSnafu {
             component: "backend",
-            kind: kind,
+            kind,
         })?;
         constructor
             .call(addr.clone(), node.clone(), ctx.clone())
@@ -75,7 +75,7 @@ impl Registry {
         })?;
         let constructor = self.farms.get(&kind).context(error::NoProviderSnafu {
             component: "environment",
-            kind: kind,
+            kind,
         })?;
         constructor
             .call(addr.clone(), node.clone(), ctx.clone())
@@ -93,7 +93,7 @@ impl Registry {
         })?;
         let constructor = self.sources.get(&kind).context(error::NoProviderSnafu {
             component: "source",
-            kind: kind,
+            kind,
         })?;
         constructor
             .call(addr.clone(), node.clone(), ctx.clone())
@@ -116,7 +116,7 @@ impl Registry {
         })?;
         let constructor = self.transforms.get(&kind).context(error::NoProviderSnafu {
             component: "transform",
-            kind: kind,
+            kind,
         })?;
         constructor
             .call(addr.clone(), node.clone(), ctx.clone())
@@ -134,10 +134,95 @@ impl Registry {
         })?;
         let constructor = self.vendors.get(&kind).context(error::NoProviderSnafu {
             component: "vendor",
-            kind: kind,
+            kind,
         })?;
         constructor
             .call(addr.clone(), node.clone(), ctx.clone())
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_backend_handler() -> Arc<dyn Handler<Backend>> {
+        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
+            unreachable!("not invoked")
+        })
+    }
+
+    fn dummy_farm_handler() -> Arc<dyn Handler<Farm>> {
+        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
+            unreachable!("not invoked")
+        })
+    }
+
+    fn dummy_source_handler() -> Arc<dyn Handler<Source>> {
+        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
+            unreachable!("not invoked")
+        })
+    }
+
+    fn dummy_transform_handler() -> Arc<dyn Handler<Transform>> {
+        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
+            unreachable!("not invoked")
+        })
+    }
+
+    fn dummy_vendor_handler() -> Arc<dyn Handler<Vendor>> {
+        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
+            unreachable!("not invoked")
+        })
+    }
+
+    #[test]
+    fn default_registry_has_empty_maps() {
+        let r = Registry::default();
+        assert!(r.backends.is_empty());
+        assert!(r.farms.is_empty());
+        assert!(r.sources.is_empty());
+        assert!(r.transforms.is_empty());
+        assert!(r.vendors.is_empty());
+    }
+
+    #[test]
+    fn register_backend_inserts_into_map() {
+        let r = Registry::default();
+        r.register_backend("kind-backend", dummy_backend_handler());
+        assert_eq!(r.backends.len(), 1);
+        assert!(r.backends.contains_key("kind-backend"));
+    }
+
+    #[test]
+    fn register_farm_inserts_into_map() {
+        let r = Registry::default();
+        r.register_farm("kind-farm", dummy_farm_handler());
+        assert_eq!(r.farms.len(), 1);
+        assert!(r.farms.contains_key("kind-farm"));
+    }
+
+    #[test]
+    fn register_source_inserts_into_map() {
+        let r = Registry::default();
+        r.register_source("kind-source", dummy_source_handler());
+        assert_eq!(r.sources.len(), 1);
+        assert!(r.sources.contains_key("kind-source"));
+    }
+
+    #[test]
+    fn register_transform_inserts_into_map() {
+        let r = Registry::default();
+        r.register_transform("kind-transform", dummy_transform_handler());
+        assert_eq!(r.transforms.len(), 1);
+        assert!(r.transforms.contains_key("kind-transform"));
+    }
+
+    #[test]
+    fn register_vendor_inserts_into_map() {
+        let r = Registry::default();
+        r.register_vendor("kind-vendor", dummy_vendor_handler());
+        assert_eq!(r.vendors.len(), 1);
+        assert!(r.vendors.contains_key("kind-vendor"));
     }
 }

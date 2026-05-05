@@ -87,3 +87,87 @@ impl Handle {
         Ok(env)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Handle;
+    use crate::context::{Addr, Config, Node, error::ContextError};
+    use crate::context::logmgr::test_support::shared_log_manager;
+    use crate::storage::{Backend, LocalBackend, Storage};
+    use std::collections::{BTreeMap, HashMap};
+    use tempfile::TempDir;
+
+    /// Build a minimal `Storage` backed by a temporary local directory.
+    async fn tmp_storage(dir: &std::path::Path) -> Storage {
+        let addr = Addr::parse("//edo-test-cache").unwrap();
+        let mut table = BTreeMap::new();
+        table.insert(
+            "path".to_string(),
+            Node::new_string(dir.to_string_lossy().to_string()),
+        );
+        let node = Node::new_definition("storage", "local", "test", table);
+        let config = Config::load::<&std::path::Path>(None).await.unwrap();
+        let local = <LocalBackend as crate::context::DefinableNoContext<
+            crate::storage::StorageError,
+            crate::context::NonConfigurable<crate::storage::StorageError>,
+        >>::new(&addr, &node, &config)
+        .await
+        .unwrap();
+        Storage::init(&Backend::new(local)).await.unwrap()
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn handle_accessors_return_passed_values() {
+        let dir = TempDir::new().unwrap();
+        let log_mgr = shared_log_manager().await;
+        let storage = tmp_storage(dir.path()).await;
+
+        let handle = Handle::new(
+            log_mgr,
+            storage,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        assert!(handle.transforms().is_empty());
+        assert!(handle.args().is_empty());
+
+        let addr = Addr::parse("//x").unwrap();
+        assert!(handle.get(&addr).is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn handle_create_environment_no_farm_errors() {
+        let dir = TempDir::new().unwrap();
+        let log_mgr = shared_log_manager().await;
+        let storage = tmp_storage(dir.path()).await;
+
+        let handle = Handle::new(
+            log_mgr.clone(),
+            storage,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+
+        let log_path = dir.path().join("test.log");
+        let log = crate::context::Log::new(&log_mgr, &log_path).unwrap();
+        let addr = Addr::parse("//missing-farm").unwrap();
+        let env_path = dir.path().join("env");
+
+        let result = handle
+            .create_environment(&log, &addr, &env_path)
+            .await;
+
+        // `Environment` doesn't implement Debug so we can't call unwrap_err();
+        // match the result manually instead.
+        match result {
+            Err(ContextError::NoEnvironmentFound { .. }) => {}
+            Err(other) => panic!("expected NoEnvironmentFound, got: {other:?}"),
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+}

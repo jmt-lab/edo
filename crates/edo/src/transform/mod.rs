@@ -47,6 +47,7 @@ pub trait Transform {
 }
 
 /// The outcome of a transform execution.
+#[allow(clippy::large_enum_variant)]
 pub enum TransformStatus {
     /// The transform completed successfully, producing the given artifact.
     Success(Artifact),

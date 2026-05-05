@@ -57,7 +57,7 @@ const TRACE_ONLY: &[&str] = &[
 ];
 
 /// Controls the tracing verbosity level for the log manager.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum LogVerbosity {
     /// Emit trace-level and above.
     Trace,
@@ -369,5 +369,65 @@ impl Visit for TaskVisitor<'_> {
         } else {
             let _ = self.writer.write_fmt(format_args!("{:?}", value));
         }
+    }
+}
+
+/// Shared test support: provides a process-wide singleton `LogManager` so that
+/// `tracing_subscriber::try_init` is only called once per test binary, regardless
+/// of how many test modules need a `LogManager`.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::{LogManager, LogVerbosity};
+    use std::sync::OnceLock;
+    use tempfile::TempDir;
+    use tokio::sync::Mutex;
+
+    /// Process-wide singleton.  The `TempDir` is kept alive here so the
+    /// directory is not deleted while any test is running.
+    static LOG_MGR_CELL: OnceLock<Mutex<Option<(LogManager, TempDir)>>> = OnceLock::new();
+
+    /// Returns a clone of the shared `LogManager`, initialising it on first call.
+    /// Subsequent calls reuse the already-initialised subscriber rather than
+    /// calling `try_init` again (which would always fail after the first call).
+    pub(crate) async fn shared_log_manager() -> LogManager {
+        let cell = LOG_MGR_CELL.get_or_init(|| Mutex::new(None));
+        let mut guard = cell.lock().await;
+        if guard.is_none() {
+            let dir = TempDir::new().expect("tempdir");
+            let logs_dir = dir.path().join("logs");
+            let mgr = LogManager::init(&logs_dir, LogVerbosity::Info)
+                .await
+                .expect("LogManager::init");
+            *guard = Some((mgr, dir));
+        }
+        guard.as_ref().unwrap().0.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogVerbosity;
+
+    #[test]
+    fn log_verbosity_eq() {
+        // LogVerbosity derives PartialEq/Eq but not Debug, so use plain
+        // `assert!` to avoid the Debug bound required by assert_eq!/assert_ne!.
+        assert!(LogVerbosity::Info == LogVerbosity::Info);
+        assert!(LogVerbosity::Debug == LogVerbosity::Debug);
+        assert!(LogVerbosity::Trace == LogVerbosity::Trace);
+        assert!(LogVerbosity::Info != LogVerbosity::Debug);
+        assert!(LogVerbosity::Debug != LogVerbosity::Trace);
+        assert!(LogVerbosity::Info != LogVerbosity::Trace);
+    }
+
+    /// Smoke-test that `shared_log_manager` returns a usable `LogManager` and
+    /// that calling it multiple times yields the same underlying instance
+    /// (i.e. `create` works on both).
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn shared_log_manager_returns_usable_manager() {
+        let mgr = super::test_support::shared_log_manager().await;
+        // Creating a log file must not panic or error.
+        let _log = mgr.create("logmgr-smoke").await.expect("create log");
     }
 }

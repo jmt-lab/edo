@@ -194,7 +194,7 @@ impl<'a> TryFrom<&'a toml::Value> for Node {
     }
 }
 
-impl<'a, 'v> TryFrom<&'a toml::Value> for Data {
+impl<'a> TryFrom<&'a toml::Value> for Data {
     type Error = error::ContextError;
 
     fn try_from(value: &'a toml::Value) -> std::result::Result<Self, Self::Error> {
@@ -354,6 +354,7 @@ impl Data {
     );
     get_field!(get_table, set_table, table, BTreeMap<String, Node>, "Returns the definition table if this is a `Definition` variant.", "Sets the definition table if this is a `Definition` variant.");
 
+    #[allow(dead_code)]
     pub(crate) fn append(&mut self, item: Node) {
         if let Self::List(items) = self {
             items.push(item)
@@ -509,6 +510,7 @@ impl Node {
         *self.data.write() = data.clone();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn append(&self, value: Node) {
         self.data.write().append(value);
     }
@@ -521,5 +523,482 @@ impl Node {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn def(id: &str, kind: &str, name: &str, table: BTreeMap<String, Node>) -> Node {
+        Node::new_definition(id, kind, name, table)
+    }
+
+    fn table_node(pairs: &[(&str, Node)]) -> Node {
+        let mut m = BTreeMap::new();
+        for (k, v) in pairs {
+            m.insert((*k).to_string(), v.clone());
+        }
+        Node::new_table(m)
+    }
+
+    // ── Component::Display ───────────────────────────────────────────────────
+
+    #[test]
+    fn component_display_storage_backend() {
+        assert_eq!(Component::StorageBackend.to_string(), "storage-backend");
+    }
+
+    #[test]
+    fn component_display_environment() {
+        assert_eq!(Component::Environment.to_string(), "environment");
+    }
+
+    #[test]
+    fn component_display_source() {
+        assert_eq!(Component::Source.to_string(), "source");
+    }
+
+    #[test]
+    fn component_display_transform() {
+        assert_eq!(Component::Transform.to_string(), "transform");
+    }
+
+    #[test]
+    fn component_display_vendor() {
+        assert_eq!(Component::Vendor.to_string(), "vendor");
+    }
+
+    // ── Data variant accessors ───────────────────────────────────────────────
+
+    #[test]
+    fn data_bool_accessor() {
+        let d = Data::new_bool(true);
+        assert_eq!(d.as_bool(), Some(&true));
+        assert!(d.as_int().is_none());
+    }
+
+    #[test]
+    fn data_int_accessor() {
+        let d = Data::new_int(42);
+        assert_eq!(d.as_int(), Some(&42_i64));
+        assert!(d.as_bool().is_none());
+    }
+
+    #[test]
+    fn data_float_accessor() {
+        let d = Data::new_float(1.5);
+        assert_eq!(d.as_float(), Some(&1.5_f64));
+        assert!(d.as_int().is_none());
+    }
+
+    #[test]
+    fn data_string_accessor() {
+        let d = Data::new_string("hello".to_string());
+        assert_eq!(d.as_string(), Some(&"hello".to_string()));
+        assert!(d.as_bool().is_none());
+    }
+
+    #[test]
+    fn data_version_accessor() {
+        let v = Version::parse("1.2.3").unwrap();
+        let d = Data::new_version(v.clone());
+        assert_eq!(d.as_version(), Some(&v));
+        assert!(d.as_bool().is_none());
+    }
+
+    #[test]
+    fn data_require_accessor() {
+        let r = VersionReq::parse(">=1.0").unwrap();
+        let d = Data::new_require(r.clone());
+        assert_eq!(d.as_require(), Some(&r));
+        assert!(d.as_bool().is_none());
+    }
+
+    #[test]
+    fn data_list_accessor() {
+        let list = vec![Node::new_bool(true), Node::new_int(1)];
+        let d = Data::new_list(list);
+        assert!(d.as_list().is_some());
+        assert_eq!(d.as_list().unwrap().len(), 2);
+        assert!(d.as_bool().is_none());
+    }
+
+    #[test]
+    fn data_table_accessor() {
+        let mut m = BTreeMap::new();
+        m.insert("x".to_string(), Node::new_int(7));
+        let d = Data::new_table(m);
+        assert!(d.as_table().is_some());
+        assert!(d.as_table().unwrap().contains_key("x"));
+        assert!(d.as_bool().is_none());
+    }
+
+    // ── Data::get_*/set_* (Definition fields) ────────────────────────────────
+
+    #[test]
+    fn data_get_fields_non_definition_returns_none() {
+        let d = Data::new_string("x".to_string());
+        assert!(d.get_id().is_none());
+        assert!(d.get_kind().is_none());
+        assert!(d.get_name().is_none());
+        assert!(d.get_table().is_none());
+    }
+
+    #[test]
+    fn data_definition_field_getters() {
+        let mut table = BTreeMap::new();
+        table.insert("foo".to_string(), Node::new_bool(false));
+        let d = Data::Definition {
+            id: "my-id".to_string(),
+            kind: "my-kind".to_string(),
+            name: "my-name".to_string(),
+            table,
+        };
+        assert_eq!(d.get_id(), Some(&"my-id".to_string()));
+        assert_eq!(d.get_kind(), Some(&"my-kind".to_string()));
+        assert_eq!(d.get_name(), Some(&"my-name".to_string()));
+        assert!(d.get_table().unwrap().contains_key("foo"));
+    }
+
+    #[test]
+    fn data_definition_field_setters() {
+        let mut d = Data::Definition {
+            id: "old-id".to_string(),
+            kind: "old-kind".to_string(),
+            name: "old-name".to_string(),
+            table: BTreeMap::new(),
+        };
+        d.set_id("new-id".to_string());
+        d.set_kind("new-kind".to_string());
+        d.set_name("new-name".to_string());
+        let mut new_table = BTreeMap::new();
+        new_table.insert("k".to_string(), Node::new_int(1));
+        d.set_table(new_table);
+
+        assert_eq!(d.get_id(), Some(&"new-id".to_string()));
+        assert_eq!(d.get_kind(), Some(&"new-kind".to_string()));
+        assert_eq!(d.get_name(), Some(&"new-name".to_string()));
+        assert!(d.get_table().unwrap().contains_key("k"));
+    }
+
+    #[test]
+    fn data_set_id_on_non_definition_is_noop() {
+        let mut d = Data::new_bool(true);
+        d.set_id("ignored".to_string()); // must not panic
+        assert_eq!(d.as_bool(), Some(&true));
+    }
+
+    // ── Data::append ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn data_append_pushes_onto_list() {
+        let mut d = Data::new_list(vec![]);
+        d.append(Node::new_int(1));
+        d.append(Node::new_int(2));
+        assert_eq!(d.as_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn data_append_noop_on_non_list() {
+        let mut d = Data::new_bool(true);
+        d.append(Node::new_int(99)); // must not panic
+        assert_eq!(d.as_bool(), Some(&true));
+    }
+
+    // ── Node accessors ────────────────────────────────────────────────────────
+
+    #[test]
+    fn node_bool_roundtrip() {
+        let n = Node::new_bool(false);
+        assert_eq!(n.as_bool(), Some(false));
+        assert!(n.as_int().is_none());
+    }
+
+    #[test]
+    fn node_int_roundtrip() {
+        let n = Node::new_int(-7);
+        assert_eq!(n.as_int(), Some(-7_i64));
+    }
+
+    #[test]
+    fn node_float_roundtrip() {
+        let n = Node::new_float(1.5);
+        assert_eq!(n.as_float(), Some(1.5_f64));
+    }
+
+    #[test]
+    fn node_string_roundtrip() {
+        let n = Node::new_string("world".to_string());
+        assert_eq!(n.as_string(), Some("world".to_string()));
+    }
+
+    #[test]
+    fn node_version_roundtrip() {
+        let v = Version::parse("2.0.0").unwrap();
+        let n = Node::new_version(v.clone());
+        assert_eq!(n.as_version(), Some(v));
+    }
+
+    #[test]
+    fn node_require_roundtrip() {
+        let r = VersionReq::parse("^1.2").unwrap();
+        let n = Node::new_require(r.clone());
+        assert_eq!(n.as_require(), Some(r));
+    }
+
+    #[test]
+    fn node_list_roundtrip() {
+        let items = vec![Node::new_int(1), Node::new_int(2)];
+        let n = Node::new_list(items);
+        assert_eq!(n.as_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn node_table_roundtrip() {
+        let n = table_node(&[("a", Node::new_bool(true))]);
+        let t = n.as_table().unwrap();
+        assert!(t.contains_key("a"));
+    }
+
+    // ── Node::set_data ────────────────────────────────────────────────────────
+
+    #[test]
+    fn node_set_data_replaces_variant() {
+        let n = Node::new_bool(true);
+        n.set_data(&Data::new_int(7));
+        assert_eq!(n.as_int(), Some(7_i64));
+        assert!(n.as_bool().is_none());
+    }
+
+    // ── Node::new_definition ─────────────────────────────────────────────────
+
+    #[test]
+    fn node_new_definition_getters() {
+        let mut t = BTreeMap::new();
+        t.insert("entry".to_string(), Node::new_bool(true));
+        let n = def("i", "k", "n", t);
+        assert_eq!(n.get_id(), Some("i".to_string()));
+        assert_eq!(n.get_kind(), Some("k".to_string()));
+        assert_eq!(n.get_name(), Some("n".to_string()));
+        assert!(n.get_table().unwrap().contains_key("entry"));
+    }
+
+    // ── Node::validate_keys ───────────────────────────────────────────────────
+
+    #[test]
+    fn validate_keys_ok_on_table() {
+        let n = table_node(&[("a", Node::new_int(1)), ("b", Node::new_int(2))]);
+        assert!(n.validate_keys(&["a", "b"]).is_ok());
+    }
+
+    #[test]
+    fn validate_keys_err_reports_missing() {
+        let n = table_node(&[("a", Node::new_int(1))]);
+        let result = n.validate_keys(&["a", "c", "d"]);
+        match result {
+            Err(error::ContextError::NodeMissingKeys { keys }) => {
+                assert_eq!(keys, vec!["c".to_string(), "d".to_string()]);
+            }
+            other => panic!("expected NodeMissingKeys, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_keys_scalar_node_is_ok() {
+        // Non-table/definition variant: no table to check → always Ok
+        let n = Node::new_bool(true);
+        assert!(n.validate_keys(&["anything"]).is_ok());
+    }
+
+    #[test]
+    fn validate_keys_definition_with_key_present() {
+        let mut t = BTreeMap::new();
+        t.insert("x".to_string(), Node::new_int(0));
+        let n = def("id", "k", "nm", t);
+        assert!(n.validate_keys(&["x"]).is_ok());
+    }
+
+    // ── Node::get ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn node_get_from_definition() {
+        let mut t = BTreeMap::new();
+        t.insert("mykey".to_string(), Node::new_int(42));
+        let n = def("i", "k", "n", t);
+        assert!(n.get("mykey").is_some());
+        assert!(n.get("missing").is_none());
+    }
+
+    #[test]
+    fn node_get_from_table() {
+        let n = table_node(&[("k", Node::new_bool(false))]);
+        assert!(n.get("k").is_some());
+        assert!(n.get("missing").is_none());
+    }
+
+    #[test]
+    fn node_get_from_scalar_returns_none() {
+        let n = Node::new_bool(true);
+        assert!(n.get("anything").is_none());
+    }
+
+    // ── TryFrom<&toml::Value> ─────────────────────────────────────────────────
+
+    #[test]
+    fn toml_bool() {
+        let v: toml::Value = toml::from_str("b = true").unwrap();
+        let n = Node::try_from(v.get("b").unwrap()).unwrap();
+        assert_eq!(n.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn toml_int() {
+        let v: toml::Value = toml::from_str("i = 42").unwrap();
+        let n = Node::try_from(v.get("i").unwrap()).unwrap();
+        assert_eq!(n.as_int(), Some(42_i64));
+    }
+
+    #[test]
+    fn toml_float() {
+        let v: toml::Value = toml::from_str("f = 3.5").unwrap();
+        let n = Node::try_from(v.get("f").unwrap()).unwrap();
+        assert_eq!(n.as_float(), Some(3.5_f64));
+    }
+
+    #[test]
+    fn toml_plain_string() {
+        // "hello" cannot be parsed as VersionReq or Version → stored as String
+        let v: toml::Value = toml::from_str(r#"s = "hello""#).unwrap();
+        let n = Node::try_from(v.get("s").unwrap()).unwrap();
+        assert_eq!(n.as_string(), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn toml_string_that_parses_as_version_req() {
+        // "1.2.3" is a valid VersionReq (semver parses it as >=1.2.3, <2); the
+        // TryFrom implementation tries VersionReq first, so this becomes Require.
+        let v: toml::Value = toml::from_str(r#"s = "1.2.3""#).unwrap();
+        let n = Node::try_from(v.get("s").unwrap()).unwrap();
+        // VersionReq is tried before Version: assert Require (not Version)
+        assert!(n.as_require().is_some(), "expected Require variant for '1.2.3'");
+    }
+
+    #[test]
+    fn toml_version_req_string() {
+        let v: toml::Value = toml::from_str(r#"r = ">=1.0""#).unwrap();
+        let n = Node::try_from(v.get("r").unwrap()).unwrap();
+        assert!(n.as_require().is_some());
+    }
+
+    #[test]
+    fn toml_array() {
+        let v: toml::Value = toml::from_str("arr = [1, 2, 3]").unwrap();
+        let n = Node::try_from(v.get("arr").unwrap()).unwrap();
+        assert_eq!(n.as_list().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn toml_nested_table() {
+        let src = "[nested]\ninner = \"x\"\n";
+        let v: toml::Value = toml::from_str(src).unwrap();
+        let n = Node::try_from(v.get("nested").unwrap()).unwrap();
+        assert!(n.get("inner").is_some());
+    }
+
+    #[test]
+    fn toml_datetime_returns_error() {
+        // Parse via a TOML document — toml::value::Datetime::from_str is not
+        // stable public API in all versions; use document parsing instead.
+        let v: toml::Value = toml::from_str("d = 1979-05-27").unwrap();
+        let d = v.get("d").unwrap();
+        let result = Node::try_from(d);
+        assert!(
+            matches!(result, Err(error::ContextError::Node)),
+            "expected ContextError::Node for Datetime, got {result:?}"
+        );
+    }
+
+    // ── TryFrom<&serde_json::Value> ───────────────────────────────────────────
+
+    #[test]
+    fn json_bool() {
+        let v = serde_json::Value::Bool(true);
+        let n = Node::try_from(&v).unwrap();
+        assert_eq!(n.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn json_int() {
+        let v = serde_json::json!(42);
+        let n = Node::try_from(&v).unwrap();
+        assert_eq!(n.as_int(), Some(42_i64));
+    }
+
+    #[test]
+    fn json_float() {
+        let v = serde_json::json!(3.5);
+        let n = Node::try_from(&v).unwrap();
+        assert_eq!(n.as_float(), Some(3.5_f64));
+    }
+
+    #[test]
+    fn json_string() {
+        let v = serde_json::json!("hi");
+        let n = Node::try_from(&v).unwrap();
+        assert_eq!(n.as_string(), Some("hi".to_string()));
+    }
+
+    #[test]
+    fn json_array() {
+        let v = serde_json::json!([1, 2]);
+        let n = Node::try_from(&v).unwrap();
+        assert_eq!(n.as_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn json_object() {
+        let v = serde_json::json!({"k": "v"});
+        let n = Node::try_from(&v).unwrap();
+        assert!(n.get("k").is_some());
+    }
+
+    #[test]
+    fn json_null_returns_error() {
+        let v = serde_json::Value::Null;
+        let result = Node::try_from(&v);
+        assert!(
+            matches!(result, Err(error::ContextError::Node)),
+            "expected ContextError::Node for Null, got {result:?}"
+        );
+    }
+
+    // ── Serde round-trips ─────────────────────────────────────────────────────
+
+    #[test]
+    fn serde_definition_roundtrip() {
+        let mut t = BTreeMap::new();
+        t.insert("other".to_string(), Node::new_string("x".to_string()));
+        let n = def("i", "k", "n", t);
+
+        let json = serde_json::to_string(&n).unwrap();
+        // Because of #[serde(untagged)] + #[serde(flatten)], the JSON is a
+        // flat object: {"id":"i","kind":"k","name":"n","other":"x"}
+        let back: Node = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.get_id(), Some("i".to_string()));
+        assert_eq!(back.get_kind(), Some("k".to_string()));
+        assert_eq!(back.get_name(), Some("n".to_string()));
+    }
+
+    #[test]
+    fn serde_table_roundtrip() {
+        let n = table_node(&[("alpha", Node::new_int(1)), ("beta", Node::new_bool(true))]);
+        let json = serde_json::to_string(&n).unwrap();
+        let back: Node = serde_json::from_str(&json).unwrap();
+        assert!(back.get("alpha").is_some());
+        assert!(back.get("beta").is_some());
     }
 }

@@ -150,3 +150,60 @@ impl Config {
         self.configs.get(name).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn load_nonexistent_path_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("does-not-exist.toml");
+        let cfg = Config::load(Some(&path)).await.expect("ok");
+        assert!(cfg.get("anything").is_none());
+    }
+
+    #[tokio::test]
+    async fn load_valid_toml_returns_parsed_nodes() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("edo.toml");
+        tokio::fs::write(&path, b"foo = \"bar\"\n").await.unwrap();
+        let cfg = Config::load(Some(&path)).await.expect("ok");
+        let node = cfg.get("foo").expect("foo exists");
+        assert_eq!(node.as_string(), Some("bar".to_string()));
+    }
+
+    #[tokio::test]
+    async fn load_malformed_toml_returns_deserialize_error() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bad.toml");
+        tokio::fs::write(&path, b"this = is = not valid toml").await.unwrap();
+        let result = Config::load(Some(&path)).await;
+        let err = result.err().expect("expected error");
+        assert!(
+            matches!(err, crate::context::ContextError::Deserialize { .. }),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_none_path_is_ok() {
+        // No assertion on contents — this depends on user's environment.
+        // The function falls back to ~/.config/edo.toml; if that does not exist, returns empty.
+        let _cfg = Config::load::<&std::path::Path>(None).await.expect("ok");
+    }
+
+    #[tokio::test]
+    async fn non_configurable_default_and_from_node() {
+        // NonConfigurable<E> must be constructible with Default.
+        // FromNodeNoContext::from_node always returns Ok for arbitrary input.
+        let _n: NonConfigurable<()> = NonConfigurable::default();
+        let addr = Addr::parse("//x").unwrap();
+        let node = Node::new_bool(true);
+        let cfg = Config::load::<&std::path::Path>(None).await.unwrap();
+        let res =
+            <NonConfigurable<()> as FromNodeNoContext>::from_node(&addr, &node, &cfg).await;
+        assert!(res.is_ok());
+    }
+}

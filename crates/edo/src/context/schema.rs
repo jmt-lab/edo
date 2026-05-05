@@ -120,6 +120,7 @@ impl SchemaV1 {
     }
 
     /// Returns the user-level config entries as nodes.
+    #[allow(dead_code)]
     pub fn get_config(&self) -> ContextResult<BTreeMap<String, Node>> {
         toml_map(&self.config)
     }
@@ -153,6 +154,7 @@ impl SchemaV1 {
 #[cfg(test)]
 mod test {
     use crate::context::schema::Schema;
+    use crate::context::ContextError;
 
     #[test]
     fn test_deserialize() {
@@ -186,5 +188,142 @@ commands    = [
     "cp hello_oci {{install-root}}/bin/hello_oci"
 ]"#;
         let _: Schema = toml::from_str(toml_str).expect("failed to parse");
+    }
+
+    #[test]
+    fn deserialize_empty_v1_defaults_all_fields() {
+        let s: Schema = toml::from_str("schema-version = \"1\"").expect("parse");
+        let Schema::V1(v1) = s;
+        assert!(v1.get_source_caches().unwrap().is_empty());
+        assert!(v1.get_build_cache().unwrap().is_none());
+        assert!(v1.get_output_cache().unwrap().is_none());
+        assert!(v1.get_environments().unwrap().is_empty());
+        assert!(v1.get_sources().unwrap().is_empty());
+        assert!(v1.get_transforms().unwrap().is_empty());
+        assert!(v1.get_vendors().unwrap().is_empty());
+        assert!(v1.get_requires().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_schema_version_fails() {
+        let r: Result<Schema, _> = toml::from_str("schema-version = \"99\"");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn get_sources_produces_definition_with_id_source_and_kind() {
+        let toml_str = r#"schema-version = "1"
+[source.foo]
+kind = "local"
+path = "x"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        let sources = v1.get_sources().unwrap();
+        let node = sources.get("foo").expect("foo exists");
+        assert_eq!(node.get_id().as_deref(), Some("source"));
+        assert_eq!(node.get_kind().as_deref(), Some("local"));
+        assert_eq!(node.get_name().as_deref(), Some("foo"));
+        // the `kind` key is stripped from the table; `path` remains
+        let table = node.get_table().unwrap();
+        assert!(table.contains_key("path"));
+        assert!(!table.contains_key("kind"));
+    }
+
+    #[test]
+    fn category_ids_match_section_names() {
+        let toml_str = r#"schema-version = "1"
+[environment.e]
+kind = "container"
+[transform.t]
+kind = "script"
+[vendor.v]
+kind = "image"
+[requires.r]
+kind = "image"
+at = "=1.0.0"
+[cache.source.c]
+kind = "local"
+path = "/tmp"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            v1.get_environments().unwrap().get("e").unwrap().get_id().as_deref(),
+            Some("environment")
+        );
+        assert_eq!(
+            v1.get_transforms().unwrap().get("t").unwrap().get_id().as_deref(),
+            Some("transform")
+        );
+        assert_eq!(
+            v1.get_vendors().unwrap().get("v").unwrap().get_id().as_deref(),
+            Some("vendor")
+        );
+        assert_eq!(
+            v1.get_requires().unwrap().get("r").unwrap().get_id().as_deref(),
+            Some("requires")
+        );
+        assert_eq!(
+            v1.get_source_caches().unwrap().get("c").unwrap().get_id().as_deref(),
+            Some("backend")
+        );
+    }
+
+    #[test]
+    fn build_and_output_cache_present() {
+        let toml_str = r#"schema-version = "1"
+[cache.build]
+kind = "local"
+path = "/tmp/b"
+[cache.output]
+kind = "local"
+path = "/tmp/o"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        let b = v1.get_build_cache().unwrap().expect("build");
+        assert_eq!(b.get_kind().as_deref(), Some("local"));
+        let o = v1.get_output_cache().unwrap().expect("output");
+        assert_eq!(o.get_kind().as_deref(), Some("local"));
+    }
+
+    #[test]
+    fn build_cache_non_table_returns_field_error() {
+        let toml_str = r#"schema-version = "1"
+[cache]
+build = "not a table"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        let err = v1.get_build_cache().expect_err("expected Field error");
+        assert!(
+            matches!(err, ContextError::Field { ref field, .. } if field == "build_cache"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn output_cache_non_table_returns_field_error() {
+        let toml_str = r#"schema-version = "1"
+[cache]
+output = "not a table"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        let err = v1.get_output_cache().expect_err("expected Field error");
+        assert!(
+            matches!(err, ContextError::Field { ref field, .. } if field == "output_cache"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_kind_in_transform_returns_field_error() {
+        let toml_str = r#"schema-version = "1"
+[transform.build]
+source = "x"
+"#;
+        let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
+        let err = v1.get_transforms().expect_err("expected Field error");
+        assert!(
+            matches!(err, ContextError::Field { ref field, .. } if field == "kind"),
+            "got: {err:?}"
+        );
     }
 }

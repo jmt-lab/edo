@@ -102,10 +102,7 @@ impl MediaType {
             | Self::Oci(comp)
             | Self::Image(comp)
             | Self::Zip(comp)
-            | Self::Custom(_, comp) => match comp {
-                Compression::None => false,
-                _ => true,
-            },
+            | Self::Custom(_, comp) => !matches!(comp, Compression::None),
         }
     }
 

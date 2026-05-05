@@ -152,3 +152,136 @@ pub enum ContextError {
         source: crate::source::SourceError,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_field() {
+        let e = ContextError::Field {
+            field: "kind".into(),
+            type_: "string".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "expected a field named 'kind' with a type of string"
+        );
+    }
+
+    #[test]
+    fn display_home() {
+        let e = ContextError::Home;
+        assert_eq!(e.to_string(), "failed to find home directory");
+    }
+
+    #[test]
+    fn display_dependency_change() {
+        let e = ContextError::DependencyChange;
+        assert_eq!(
+            e.to_string(),
+            "dependencies have changed, run edo update to update the lockfile"
+        );
+    }
+
+    #[test]
+    fn display_malformed_lock() {
+        let addr = Addr::parse("//x/y").unwrap();
+        let e = ContextError::MalformedLock { addr };
+        assert_eq!(
+            e.to_string(),
+            "lockfile is missing resolution data for: //x/y"
+        );
+    }
+
+    #[test]
+    fn display_node() {
+        let e = ContextError::Node;
+        assert_eq!(e.to_string(), "could not read to a configuration node");
+    }
+
+    #[test]
+    fn display_node_missing_keys() {
+        let e = ContextError::NodeMissingKeys {
+            keys: vec!["foo".into(), "bar".into()],
+        };
+        assert_eq!(e.to_string(), "node is missing required keys foo, bar");
+    }
+
+    #[test]
+    fn display_node_no_kind() {
+        let e = ContextError::NodeNoKind;
+        assert_eq!(e.to_string(), "node is missing a kind definition");
+    }
+
+    #[test]
+    fn display_node_no_name() {
+        let e = ContextError::NodeNoName;
+        assert_eq!(e.to_string(), "node is missing a name");
+    }
+
+    #[test]
+    fn display_node_no_id() {
+        let e = ContextError::NodeNoId;
+        assert_eq!(e.to_string(), "node is missing an id");
+    }
+
+    #[test]
+    fn display_no_block_id() {
+        let e = ContextError::NoBlockId;
+        assert_eq!(e.to_string(), "could not determine block id");
+    }
+
+    #[test]
+    fn display_not_environment() {
+        let e = ContextError::NotEnvironment;
+        assert_eq!(e.to_string(), "block is not an environment definition");
+    }
+
+    #[test]
+    fn display_no_environment_found() {
+        let addr = Addr::parse("//x/y").unwrap();
+        let e = ContextError::NoEnvironmentFound { addr };
+        assert_eq!(e.to_string(), "no environment found with addr '//x/y'");
+    }
+
+    #[test]
+    fn display_no_plugin() {
+        let addr = Addr::parse("//x/y").unwrap();
+        let e = ContextError::NoPlugin { addr };
+        assert_eq!(e.to_string(), "no plugin loaded with addr '//x/y'");
+    }
+
+    #[test]
+    fn display_no_provider() {
+        let e = ContextError::NoProvider {
+            component: "storage".into(),
+            kind: "s3".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "no implementation is loaded that supports a storage of kind s3"
+        );
+    }
+
+    #[test]
+    fn display_not_transform() {
+        let e = ContextError::NotTransform;
+        assert_eq!(e.to_string(), "block is not a transform definition");
+    }
+
+    #[test]
+    fn display_not_valid_source() {
+        let e = ContextError::NotValidSource { id: "bad-id".into() };
+        assert_eq!(
+            e.to_string(),
+            "'bad-id' is not a valid block id for a source definition"
+        );
+    }
+
+    #[test]
+    fn display_not_vendor() {
+        let e = ContextError::NotVendor;
+        assert_eq!(e.to_string(), "block is not a vendor definition");
+    }
+}

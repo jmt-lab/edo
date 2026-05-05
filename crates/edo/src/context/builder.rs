@@ -32,7 +32,7 @@ pub struct Project {
     need_resolution: BTreeMap<Addr, Node>,
 }
 
-fn handle_sources(namespace: &Addr, node: &Node, sources: &BTreeMap<Addr, Node>) -> Result<Node> {
+fn handle_sources(namespace: &Addr, node: &Node, _sources: &BTreeMap<Addr, Node>) -> Result<Node> {
     let id = node.get_id().context(error::NodeSnafu)?;
     let kind = node.get_kind().context(error::NodeSnafu)?;
     let name = node.get_name().context(error::NodeSnafu)?;
@@ -152,7 +152,7 @@ impl Project {
                     }
                     table.insert("source".to_string(), Node::new_list(items));
                 } else {
-                    let mut addr =
+                    let addr =
                         Addr::parse(&source.as_string().context(error::FieldSnafu {
                             field: "source",
                             type_: "string",
@@ -209,7 +209,7 @@ impl Project {
                     let addr = namespace.join(&name);
                     self.vendors.insert(addr, node);
                 }
-                return Ok(sources);
+                Ok(sources)
             }
         }
     }
@@ -386,3 +386,554 @@ macro_rules! non_configurable_no_context {
 
 pub use non_configurable;
 pub use non_configurable_no_context;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn addr(s: &str) -> Addr {
+        Addr::parse(s).unwrap()
+    }
+
+    fn def_node(
+        id: &str,
+        kind: &str,
+        name: &str,
+        table: BTreeMap<String, Node>,
+    ) -> Node {
+        Node::new_definition(id, kind, name, table)
+    }
+
+    fn write_edo_toml(dir: &Path, content: &str) {
+        std::fs::write(dir.join("edo.toml"), content).expect("write edo.toml");
+    }
+
+    fn empty_project(path: &Path) -> Project {
+        Project {
+            project_path: path.to_path_buf(),
+            source_caches: BTreeMap::new(),
+            build_cache: None,
+            output_cache: None,
+            vendors: BTreeMap::new(),
+            environments: BTreeMap::new(),
+            transforms: BTreeMap::new(),
+            need_resolution: BTreeMap::new(),
+        }
+    }
+
+    // ── handle_sources tests ─────────────────────────────────────────────────
+
+    /// An absolute address (starts with "//") is kept as-is.
+    #[test]
+    fn handle_sources_absolute_address_kept_as_is() {
+        let namespace = addr("//ns");
+        let mut table = BTreeMap::new();
+        table.insert(
+            "source".to_string(),
+            Node::new_string("//abs/addr".to_string()),
+        );
+        let node = def_node("transform", "script", "build", table);
+        let result = handle_sources(&namespace, &node, &BTreeMap::new());
+        let out = result.expect("handle_sources should succeed");
+        let t = out.get_table().unwrap();
+        assert_eq!(
+            t.get("source").unwrap().as_string().as_deref(),
+            Some("//abs/addr"),
+        );
+    }
+
+    /// A relative address (no "//" prefix) is joined with the namespace.
+    #[test]
+    fn handle_sources_relative_address_joined() {
+        let namespace = addr("//ns");
+        let mut table = BTreeMap::new();
+        table.insert(
+            "source".to_string(),
+            Node::new_string("relative".to_string()),
+        );
+        let node = def_node("transform", "script", "build", table);
+        let result = handle_sources(&namespace, &node, &BTreeMap::new());
+        let out = result.expect("handle_sources should succeed");
+        let t = out.get_table().unwrap();
+        assert_eq!(
+            t.get("source").unwrap().as_string().as_deref(),
+            Some("//ns/relative"),
+        );
+    }
+
+    /// A list source mixes absolute and relative elements correctly.
+    #[test]
+    fn handle_sources_list_mixes_absolute_and_relative() {
+        let namespace = addr("//ns");
+        let list = Node::new_list(vec![
+            Node::new_string("a".to_string()),
+            Node::new_string("//b/c".to_string()),
+        ]);
+        let mut table = BTreeMap::new();
+        table.insert("source".to_string(), list);
+        let node = def_node("transform", "script", "build", table);
+        let out = handle_sources(&namespace, &node, &BTreeMap::new())
+            .expect("handle_sources should succeed");
+        let t = out.get_table().unwrap();
+        let items = t.get("source").unwrap().as_list().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].as_string().as_deref(), Some("//ns/a"));
+        assert_eq!(items[1].as_string().as_deref(), Some("//b/c"));
+    }
+
+    /// A list element that is not a string produces a Field error.
+    #[test]
+    fn handle_sources_list_non_string_element_errors() {
+        let namespace = addr("//ns");
+        let list = Node::new_list(vec![Node::new_int(123)]);
+        let mut table = BTreeMap::new();
+        table.insert("source".to_string(), list);
+        let node = def_node("transform", "script", "build", table);
+        let result = handle_sources(&namespace, &node, &BTreeMap::new());
+        match result {
+            Err(error::ContextError::Field { field, .. }) => {
+                assert_eq!(field, "requires");
+            }
+            other => panic!("expected Field error, got: {other:?}"),
+        }
+    }
+
+    /// A non-Definition node (e.g. bool) produces a Node error.
+    #[test]
+    fn handle_sources_missing_id_kind_name_errors() {
+        let namespace = addr("//ns");
+        let node = Node::new_bool(true);
+        let result = handle_sources(&namespace, &node, &BTreeMap::new());
+        assert!(
+            matches!(result, Err(error::ContextError::Node)),
+            "expected Node error, got: {result:?}",
+        );
+    }
+
+    /// A definition node without a "source" key passes through unchanged.
+    #[test]
+    fn handle_sources_without_source_passes_through() {
+        let namespace = addr("//ns");
+        let mut table = BTreeMap::new();
+        table.insert("key".to_string(), Node::new_string("val".to_string()));
+        let node = def_node("transform", "script", "build", table);
+        let out = handle_sources(&namespace, &node, &BTreeMap::new())
+            .expect("handle_sources should succeed");
+        let t = out.get_table().unwrap();
+        assert!(t.contains_key("key"));
+        assert!(!t.contains_key("source"));
+    }
+
+    // ── Project::calculate_digest tests ──────────────────────────────────────
+
+    /// The digest is non-empty and contains only lowercase hex characters.
+    #[test]
+    fn calculate_digest_is_lowercase_hex() {
+        let dir = TempDir::new().unwrap();
+        let mut project = empty_project(dir.path());
+        project
+            .need_resolution
+            .insert(addr("//x"), Node::new_string("a".to_string()));
+        let digest = project.calculate_digest().expect("digest ok");
+        assert!(!digest.is_empty(), "digest must be non-empty");
+        assert!(
+            digest.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+            "digest must be lowercase hex, got: {digest}",
+        );
+    }
+
+    /// The same need_resolution content always produces the same digest.
+    #[test]
+    fn calculate_digest_stable_for_same_input() {
+        let dir = TempDir::new().unwrap();
+        let mut p1 = empty_project(dir.path());
+        p1.need_resolution
+            .insert(addr("//x"), Node::new_string("same".to_string()));
+        let mut p2 = empty_project(dir.path());
+        p2.need_resolution
+            .insert(addr("//x"), Node::new_string("same".to_string()));
+        assert_eq!(
+            p1.calculate_digest().unwrap(),
+            p2.calculate_digest().unwrap(),
+        );
+    }
+
+    /// Different need_resolution values produce different digests.
+    #[test]
+    fn calculate_digest_changes_with_content() {
+        let dir = TempDir::new().unwrap();
+        let mut p1 = empty_project(dir.path());
+        p1.need_resolution
+            .insert(addr("//x"), Node::new_string("a".to_string()));
+        let mut p2 = empty_project(dir.path());
+        p2.need_resolution
+            .insert(addr("//x"), Node::new_string("b".to_string()));
+        assert_ne!(
+            p1.calculate_digest().unwrap(),
+            p2.calculate_digest().unwrap(),
+        );
+    }
+
+    // ── Project::load_toml tests ──────────────────────────────────────────────
+
+    /// load_toml populates all major sections from a complete edo.toml.
+    #[test]
+    fn load_toml_populates_all_sections() {
+        let dir = TempDir::new().unwrap();
+        let content = r#"
+schema-version = "1"
+
+[source.foo]
+kind = "local"
+path = "x"
+
+[transform.t]
+kind = "script"
+source = "foo"
+
+[vendor.v]
+kind = "image"
+
+[cache.source.c]
+kind = "local"
+path = "/tmp"
+
+[cache.build]
+kind = "local"
+path = "/tmp/b"
+
+[cache.output]
+kind = "local"
+path = "/tmp/o"
+
+[requires.bar]
+kind = "image"
+at = "=1.0.0"
+"#;
+        write_edo_toml(dir.path(), content);
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let sources = project
+            .load_toml(&ns, &dir.path().join("edo.toml"))
+            .expect("load_toml ok");
+
+        // sources map must contain the regular source "foo" and "bar" (requires)
+        assert!(
+            sources.contains_key(&ns.join("foo")),
+            "sources must contain 'foo'",
+        );
+        assert!(
+            sources.contains_key(&ns.join("bar")),
+            "sources must contain 'bar' (requires)",
+        );
+
+        // transforms
+        assert!(
+            project.transforms.contains_key(&ns.join("t")),
+            "transforms must contain 't'",
+        );
+
+        // vendors
+        assert!(
+            project.vendors.contains_key(&ns.join("v")),
+            "vendors must contain 'v'",
+        );
+
+        // source caches
+        assert!(
+            project.source_caches.contains_key(&ns.join("c")),
+            "source_caches must contain 'c'",
+        );
+
+        // build / output caches
+        assert!(project.build_cache.is_some(), "build_cache must be Some");
+        assert!(project.output_cache.is_some(), "output_cache must be Some");
+
+        // need_resolution
+        assert!(
+            project.need_resolution.contains_key(&ns.join("bar")),
+            "need_resolution must contain 'bar'",
+        );
+    }
+
+    /// Malformed TOML returns a Deserialize error.
+    #[test]
+    fn load_toml_malformed_toml_errors() {
+        let dir = TempDir::new().unwrap();
+        write_edo_toml(dir.path(), "this is = not = valid");
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let result = project.load_toml(&ns, &dir.path().join("edo.toml"));
+        assert!(
+            matches!(result, Err(error::ContextError::Deserialize { .. })),
+            "expected Deserialize error, got: {result:?}",
+        );
+    }
+
+    /// A source block without a `kind` field returns a Field error.
+    #[test]
+    fn load_toml_missing_kind_errors() {
+        let dir = TempDir::new().unwrap();
+        // source.foo has no `kind`
+        let content = "schema-version = \"1\"\n[source.foo]\npath = \"x\"\n";
+        write_edo_toml(dir.path(), content);
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let result = project.load_toml(&ns, &dir.path().join("edo.toml"));
+        match result {
+            Err(error::ContextError::Field { ref field, .. }) => {
+                assert_eq!(field, "kind");
+            }
+            other => panic!("expected Field {{field: \"kind\", ..}}, got: {other:?}"),
+        }
+    }
+
+    // ── Project::walk tests ───────────────────────────────────────────────────
+
+    /// walk collects edo.toml from the root and a subdirectory.
+    #[test]
+    fn walk_collects_edo_toml_from_subdirs() {
+        let dir = TempDir::new().unwrap();
+        let root_content =
+            "schema-version = \"1\"\n[source.a]\nkind = \"local\"\npath = \"x\"\n";
+        write_edo_toml(dir.path(), root_content);
+
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let sub_content =
+            "schema-version = \"1\"\n[source.b]\nkind = \"local\"\npath = \"y\"\n";
+        std::fs::write(sub.join("edo.toml"), sub_content).unwrap();
+
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let mut sources = BTreeMap::new();
+        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+
+        assert!(
+            sources.contains_key(&ns.join("a")),
+            "sources must contain 'a' (root)",
+        );
+        assert!(
+            sources.contains_key(&ns.join("sub").join("b")),
+            "sources must contain 'sub/b'",
+        );
+    }
+
+    /// walk on an empty directory succeeds and adds nothing to sources.
+    #[test]
+    fn walk_empty_directory_is_ok() {
+        let dir = TempDir::new().unwrap();
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let mut sources = BTreeMap::new();
+        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+        assert!(sources.is_empty(), "sources must be empty for empty dir");
+    }
+
+    /// walk ignores non-edo.toml files.
+    #[test]
+    fn walk_skips_non_edo_toml_files() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("other.toml"), "schema-version = \"1\"\n").unwrap();
+        let ns = Addr::default();
+        let mut project = empty_project(dir.path());
+        let mut sources = BTreeMap::new();
+        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+        assert!(sources.is_empty(), "sources must be empty (no edo.toml)");
+    }
+
+    // ── Project::resolve_sources tests ───────────────────────────────────────
+
+    /// resolve_sources rewrites a scalar "source" string to the actual source node.
+    #[test]
+    fn resolve_sources_rewrites_scalar_source() {
+        let dir = TempDir::new().unwrap();
+        let src_addr = addr("//ns/s");
+        let real_node = Node::new_string("real source".to_string());
+        let mut sources = BTreeMap::new();
+        sources.insert(src_addr.clone(), real_node.clone());
+
+        let mut table = BTreeMap::new();
+        table.insert("source".to_string(), Node::new_string(src_addr.to_string()));
+        let transform_node = def_node("transform", "script", "t", table);
+
+        let mut project = empty_project(dir.path());
+        project
+            .transforms
+            .insert(addr("//t"), transform_node);
+        project.resolve_sources(&sources).expect("resolve_sources ok");
+
+        let t = project.transforms.get(&addr("//t")).unwrap();
+        let tbl = t.get_table().unwrap();
+        assert_eq!(
+            tbl.get("source").unwrap().as_string().as_deref(),
+            Some("real source"),
+        );
+    }
+
+    /// resolve_sources rewrites a list of source addresses to actual nodes.
+    #[test]
+    fn resolve_sources_rewrites_list_source() {
+        let dir = TempDir::new().unwrap();
+        let sa = addr("//ns/a");
+        let sb = addr("//ns/b");
+        let node_a = Node::new_string("node-a".to_string());
+        let node_b = Node::new_string("node-b".to_string());
+        let mut sources = BTreeMap::new();
+        sources.insert(sa.clone(), node_a);
+        sources.insert(sb.clone(), node_b);
+
+        let list = Node::new_list(vec![
+            Node::new_string(sa.to_string()),
+            Node::new_string(sb.to_string()),
+        ]);
+        let mut table = BTreeMap::new();
+        table.insert("source".to_string(), list);
+        let transform_node = def_node("transform", "script", "t", table);
+
+        let mut project = empty_project(dir.path());
+        project
+            .transforms
+            .insert(addr("//t"), transform_node);
+        project.resolve_sources(&sources).expect("resolve_sources ok");
+
+        let t = project.transforms.get(&addr("//t")).unwrap();
+        let tbl = t.get_table().unwrap();
+        let items = tbl.get("source").unwrap().as_list().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].as_string().as_deref(), Some("node-a"));
+        assert_eq!(items[1].as_string().as_deref(), Some("node-b"));
+    }
+
+    /// resolve_sources returns NotValidSource when the referenced addr is absent.
+    #[test]
+    fn resolve_sources_missing_source_errors() {
+        let dir = TempDir::new().unwrap();
+        let mut table = BTreeMap::new();
+        table.insert(
+            "source".to_string(),
+            Node::new_string("//missing".to_string()),
+        );
+        let transform_node = def_node("transform", "script", "t", table);
+        let mut project = empty_project(dir.path());
+        project
+            .transforms
+            .insert(addr("//t"), transform_node);
+        let result = project.resolve_sources(&BTreeMap::new());
+        match result {
+            Err(error::ContextError::NotValidSource { id }) => {
+                assert!(id.contains("missing"), "id should mention 'missing', got: {id}");
+            }
+            other => panic!("expected NotValidSource, got: {other:?}"),
+        }
+    }
+
+    /// resolve_sources returns a Field error when "source" is not a string.
+    #[test]
+    fn resolve_sources_wrong_type_errors() {
+        let dir = TempDir::new().unwrap();
+        let mut table = BTreeMap::new();
+        table.insert("source".to_string(), Node::new_int(42));
+        let transform_node = def_node("transform", "script", "t", table);
+        let mut project = empty_project(dir.path());
+        project
+            .transforms
+            .insert(addr("//t"), transform_node);
+        let result = project.resolve_sources(&BTreeMap::new());
+        assert!(
+            matches!(result, Err(error::ContextError::Field { .. })),
+            "expected Field error, got: {result:?}",
+        );
+    }
+
+    // ── Macro tests ───────────────────────────────────────────────────────────
+
+    /// non_configurable! generates a working Definable impl with key() == "noop".
+    #[test]
+    fn non_configurable_macro_compiles() {
+        use async_trait::async_trait;
+
+        #[derive(Default)]
+        struct DummyCtx;
+
+        #[derive(Debug)]
+        struct DummyCtxErr;
+
+        #[async_trait]
+        impl FromNode for DummyCtx {
+            type Error = DummyCtxErr;
+            async fn from_node(
+                _addr: &Addr,
+                _node: &Node,
+                _ctx: &Context,
+            ) -> std::result::Result<Self, DummyCtxErr> {
+                Ok(DummyCtx)
+            }
+        }
+
+        // Invoke the macro — expands to a Definable impl for DummyCtx.
+        non_configurable!(DummyCtx, DummyCtxErr);
+
+        // Verify key() and set_config() via the Definable trait.
+        assert_eq!(
+            <DummyCtx as crate::context::Definable<
+                DummyCtxErr,
+                crate::context::NonConfigurable<DummyCtxErr>,
+            >>::key(),
+            "noop",
+        );
+        let mut d = DummyCtx;
+        let cfg = crate::context::NonConfigurable::<DummyCtxErr>::default();
+        <DummyCtx as crate::context::Definable<
+            DummyCtxErr,
+            crate::context::NonConfigurable<DummyCtxErr>,
+        >>::set_config(&mut d, &cfg)
+        .unwrap();
+    }
+
+    /// non_configurable_no_context! generates a working DefinableNoContext impl.
+    #[test]
+    fn non_configurable_no_context_macro_compiles() {
+        use async_trait::async_trait;
+        use crate::context::{Config, FromNodeNoContext};
+
+        #[derive(Default)]
+        struct DummyNoCtx;
+
+        #[derive(Debug)]
+        struct DummyNoCtxErr;
+
+        #[async_trait]
+        impl FromNodeNoContext for DummyNoCtx {
+            type Error = DummyNoCtxErr;
+            async fn from_node(
+                _addr: &Addr,
+                _node: &Node,
+                _cfg: &Config,
+            ) -> std::result::Result<Self, DummyNoCtxErr> {
+                Ok(DummyNoCtx)
+            }
+        }
+
+        non_configurable_no_context!(DummyNoCtx, DummyNoCtxErr);
+
+        assert_eq!(
+            <DummyNoCtx as crate::context::DefinableNoContext<
+                DummyNoCtxErr,
+                crate::context::NonConfigurable<DummyNoCtxErr>,
+            >>::key(),
+            "noop",
+        );
+        let mut d = DummyNoCtx;
+        let cfg = crate::context::NonConfigurable::<DummyNoCtxErr>::default();
+        <DummyNoCtx as crate::context::DefinableNoContext<
+            DummyNoCtxErr,
+            crate::context::NonConfigurable<DummyNoCtxErr>,
+        >>::set_config(&mut d, &cfg)
+        .unwrap();
+    }
+}

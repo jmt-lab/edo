@@ -204,6 +204,7 @@ impl BackendImpl for LocalBackend {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn prune_all(&self) -> StorageResult<()> {
         let lock = self.catalog_file.write();
         tokio::fs::remove_file(lock.as_path())

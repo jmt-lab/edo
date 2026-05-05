@@ -4,7 +4,7 @@ A starting point for AI agents navigating this repository. For deeper topic-leve
 
 ## What Edo Is
 
-Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggable abstractions — **Storage, Source, Environment, Transform** — orchestrated by a `Context` + `Scheduler`. Extensibility via an in-process plugin system.
+Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggable abstractions — **Storage, Source, Environment, Transform** — orchestrated by a `Context` + `Scheduler`. Builtin component implementations live in the `edo-core` crate and are registered directly against a `Context` via `register_core`.
 
 ## Repository Map
 
@@ -21,25 +21,26 @@ Rust build tool (workspace, edition 2024, requires Rust ≥ 1.86). Four pluggabl
 │   ├── hello_rust/         # cargo-vendor + offline build example
 │   └── hello_oci/          # container farm example (flagged broken in README)
 └── crates/
-    ├── edo/                # CLI binary (`edo`)
-    │   └── src/cmd/        # one file per subcommand
-    ├── edo-core/           # engine library
+    ├── cli/                # CLI binary crate `edo-cli` (produces `edo`)
     │   └── src/
-    │       ├── context/    # Context, Addr, Config, Node, Schema, Lock, Log, Project
+    │       ├── main.rs
+    │       └── cmd/        # one file per subcommand (run, checkout, update, list, prune)
+    ├── edo/                # engine library crate `edo`
+    │   └── src/
+    │       ├── context/    # Context, Addr, Config, Node, Schema, Lock, Log, Project, Registry, Handle
     │       ├── storage/    # Storage + Backend + Artifact/Layer/Id + LocalBackend
     │       ├── source/     # Source, Vendor, resolvo-based resolver
     │       ├── environment/# Environment, Farm, Command (deferred)
     │       ├── transform/  # Transform trait + TransformStatus
     │       ├── scheduler/  # DAG executor (Graph, execute, workers)
-    │       ├── plugin/     # plugin host + adapters (impl_/*) + bindings
     │       └── util/       # Reader/Writer/fs/cmd/sync helpers
-    ├── edo-plugin-sdk/     # guest-side SDK (Stub defaults)
-    ├── edo-wit/            # plugin interface definitions (NOT a Cargo crate)
-    └── plugins/
-        └── edo-core-plugin/# builtin in-process plugin
-            └── src/        # storage/s3, environment/{local,container},
-                            # source/{git,local,oci,remote,vendor},
-                            # transform/{compose,import,script}, vendor/oci
+    └── core/               # builtin impls crate `edo-core` — registers via `register_core(&ctx)`
+        └── src/
+            ├── storage/    # s3
+            ├── environment/# local, container
+            ├── source/     # git, local, oci, remote, vendor
+            ├── transform/  # compose, import, script
+            └── vendor/     # oci
 ```
 
 Runtime artefacts (gitignored): `.edo/` (engine working dir + local cache), `edo.lock.json`.
@@ -48,17 +49,17 @@ Runtime artefacts (gitignored): `.edo/` (engine working dir + local cache), `edo
 
 | Topic                  | Where                                                           |
 | ---------------------- | --------------------------------------------------------------- |
-| CLI `main`             | `crates/edo/src/main.rs`                                        |
-| Session bootstrap      | `crates/edo/src/cmd/mod.rs::create_context`                     |
-| TOML schema (v1)       | `crates/edo-core/src/context/schema.rs`                         |
-| Project loader         | `crates/edo-core/src/context/builder.rs` (`Project`)            |
-| DAG scheduler          | `crates/edo-core/src/scheduler/{mod,graph,execute}.rs`          |
-| Plugin host            | `crates/edo-core/src/plugin/{mod,host,bindings}.rs` + `impl_/*` |
-| Builtin kinds dispatch | `crates/plugins/edo-core-plugin/src/lib.rs::CorePlugin`         |
+| CLI `main`             | `crates/cli/src/main.rs`                                        |
+| Session bootstrap      | `crates/cli/src/cmd/mod.rs::create_context`                     |
+| TOML schema (v1)       | `crates/edo/src/context/schema.rs`                              |
+| Project loader         | `crates/edo/src/context/builder.rs` (`Project`)                 |
+| DAG scheduler          | `crates/edo/src/scheduler/{mod,graph,execute}.rs`               |
+| Context + Registry     | `crates/edo/src/context/{mod,registry,handle}.rs`               |
+| Builtin kinds register | `crates/core/src/lib.rs::register_core`                         |
 
 ## Supported Builtin Kinds
 
-Driven by `CorePlugin::supports` in `crates/plugins/edo-core-plugin/src/lib.rs`.
+Registered by `register_core` in `crates/core/src/lib.rs` against `Context::registry()`.
 
 | Component       | Kinds                                       |
 | --------------- | ------------------------------------------- |
@@ -74,25 +75,23 @@ Registry keys use `Addr::parse`. Conventions:
 
 - `//<project>/<name>` — user items from `edo.toml`.
 - `//default` — the default `local` farm auto-registered by the CLI.
-- `//edo-local-cache`, `//edo-source-cache/<name>`, `//edo-build-cache`, `//edo-output-cache` — storage slots. Only visible in `crates/edo-core/src/storage/mod.rs` comments; remember them when wiring caches.
-- `edo` (bare) — the preloaded builtin plugin.
+- `//edo-local-cache`, `//edo-source-cache/<name>`, `//edo-build-cache`, `//edo-output-cache` — storage slots. See `crates/edo/src/storage/mod.rs` comments; remember them when wiring caches.
 
 ## Repo-Specific Patterns You Will Otherwise Miss
 
 - **`arc_handle` macro**: Every core trait (`Source`, `Environment`, `Farm`, `Transform`, `Backend`, `Plugin`, `Vendor`) is declared with `#[arc_handle]`. You implement `TraitImpl`, wrap with `Trait::new(impl)`, and pass the resulting cheap-to-clone handle. Don't expect bare trait objects.
 - **`non_configurable!` macro**: Short-hand for `FromNodeNoContext` impls on types that take no config.
-- **`transform_err!` macro** (`edo-core/src/transform/mod.rs`): Use inside `fn transform(...) -> TransformStatus` instead of `?` — it converts `Result::Err` into `TransformStatus::Failed` with logging.
-- **Handlebars templating** in `ScriptTransform.commands`. Known variables from examples: `{{install-root}}`, `{{build-root}}`. Read `crates/plugins/edo-core-plugin/src/transform/script.rs` for the full set.
-- **`edo-wit` is NOT in the workspace members list**. It has no `Cargo.toml`. Treat it as source-of-truth for the plugin contract.
+- **`transform_err!` macro** (`crates/edo/src/transform/mod.rs`): Use inside `fn transform(...) -> TransformStatus` instead of `?` — it converts `Result::Err` into `TransformStatus::Failed` with logging.
+- **Handlebars templating** in `ScriptTransform.commands`. Known variables from examples: `{{install-root}}`, `{{build-root}}`. Read `crates/core/src/transform/script.rs` for the full set.
 - **`examples/` is `exclude`d** from the workspace — `cargo build` from the root will not touch it.
-- **`default-members = ["crates/edo"]`** — plain `cargo build` / `cargo run` only builds the CLI crate. Use `-p <crate>` or `--workspace` to touch everything.
+- **`default-members = ["crates/cli"]`** — plain `cargo build` / `cargo run` only builds the CLI binary. Use `-p <crate>` or `--workspace` to touch everything.
 - **`#[snafu::report]` on `main`** — panics/errors get formatted reports; individual error enums use `#[snafu(transparent)]` heavily to bubble `?` across subsystem boundaries.
 - **Storage `fetch_source` vs `fetch`** — prefer `Source::cache(log, storage)` (cache-aware) over direct `fetch` (always re-pulls).
-- **`#[macro_use] extern crate tracing;`** at the top of library crates — tracing macros (`info!`, `debug!`, `error!`) are available unqualified inside `edo-core` and `edo-core-plugin`. Match this style when adding new modules.
+- **`#[macro_use] extern crate tracing;`** at the top of `crates/edo/src/lib.rs` and `crates/core/src/lib.rs` — tracing macros (`info!`, `debug!`, `error!`) are available unqualified inside those crates. Match this style when adding new modules.
 
 ## Caveats (from `.agents/summary/review_notes.md`)
 
-- `README.md` and `docs/design.md` describe a **Starlark** configuration language. The implementation uses **TOML** (`schema-version = "1"`). Trust `crates/edo-core/src/context/schema.rs` and any `examples/**/edo.toml`, not the README, for config syntax.
+- `README.md` and `docs/design.md` describe a **Starlark** configuration language. The implementation uses **TOML** (`schema-version = "1"`). Trust `crates/edo/src/context/schema.rs` and any `examples/**/edo.toml`, not the README, for config syntax.
 - `docs/design.md` references a "Build Engine" type that does not exist; responsibilities live in `Context` + `Scheduler`.
 - README "Quick Start", "Configuration Reference", and "Plugin Development" are explicit TODOs.
 - `examples/hello_oci` is flagged broken in `examples/README.md`.
