@@ -3,12 +3,12 @@
 //! Constructs a directed acyclic graph from transform dependencies, resolves
 //! build-cache hits, and drives parallel execution within batch-size limits.
 
-use std::collections::{HashSet, VecDeque};
-use std::future::Future;
-use std::ops::Index;
-use std::path::Path;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, atomic::Ordering};
+use super::execute::execute;
+use super::node::Node;
+use super::{Result, error};
+use crate::context::{Addr, Context, Handle, Log};
+use crate::storage::Artifact;
+use crate::transform::Transform;
 use async_recursion::async_recursion;
 use bimap::BiHashMap;
 use daggy::petgraph::Direction;
@@ -19,15 +19,15 @@ use dashmap::DashMap;
 use futures::future::try_join_all;
 use snafu::OptionExt;
 use snafu::ResultExt;
+use std::collections::{HashSet, VecDeque};
+use std::future::Future;
+use std::ops::Index;
+use std::path::Path;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, atomic::Ordering};
 use tempfile::TempDir;
 use tokio::task::{JoinError, JoinHandle};
 use tracing::Instrument;
-use super::execute::execute;
-use super::node::Node;
-use super::{Result, error};
-use crate::context::{Addr, Context, Handle, Log};
-use crate::storage::Artifact;
-use crate::transform::Transform;
 
 /// DAG-based execution graph that manages transform dependencies and parallel execution.
 #[derive(Clone)]
@@ -442,9 +442,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::context::{Addr, Context, Handle, LogVerbosity};
-    use crate::environment::{
-        Command, EnvResult, Environment, EnvironmentImpl, Farm, FarmImpl,
-    };
+    use crate::environment::{Command, EnvResult, Environment, EnvironmentImpl, Farm, FarmImpl};
     use crate::storage::{Artifact as StorageArtifact, Config as ArtifactConfig, Id, MediaType};
     use crate::transform::{Transform, TransformImpl, TransformResult, TransformStatus};
     use crate::util::{Reader, Writer};
@@ -583,11 +581,7 @@ pub(crate) mod tests {
         ) -> EnvResult<()> {
             Ok(())
         }
-        async fn create(
-            &self,
-            _log: &crate::context::Log,
-            _path: &Path,
-        ) -> EnvResult<Environment> {
+        async fn create(&self, _log: &crate::context::Log, _path: &Path) -> EnvResult<Environment> {
             Ok(Environment::new(MockEnvironmentImpl))
         }
     }
@@ -670,11 +664,7 @@ pub(crate) mod tests {
             Ok(self.deps.clone())
         }
 
-        async fn prepare(
-            &self,
-            _log: &crate::context::Log,
-            _ctx: &Handle,
-        ) -> TransformResult<()> {
+        async fn prepare(&self, _log: &crate::context::Log, _ctx: &Handle) -> TransformResult<()> {
             self.prepare_called.fetch_add(1, AtomicOrdering::SeqCst);
             Ok(())
         }
@@ -928,13 +918,7 @@ pub(crate) mod tests {
         let order = Arc::new(TokioMutex::new(Vec::new()));
         let mi = Arc::new(AtomicUsize::new(0));
         let h_c = register_mock(&ctx, "//glin/c", &[], order.clone(), mi.clone());
-        let h_b = register_mock(
-            &ctx,
-            "//glin/b",
-            &["//glin/c"],
-            order.clone(),
-            mi.clone(),
-        );
+        let h_b = register_mock(&ctx, "//glin/b", &["//glin/c"], order.clone(), mi.clone());
         let h_a = register_mock(&ctx, "//glin/a", &["//glin/b"], order.clone(), mi);
 
         let mut g = Graph::new(4);

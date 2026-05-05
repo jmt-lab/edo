@@ -178,7 +178,9 @@ mod tests {
     async fn load_malformed_toml_returns_deserialize_error() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("bad.toml");
-        tokio::fs::write(&path, b"this = is = not valid toml").await.unwrap();
+        tokio::fs::write(&path, b"this = is = not valid toml")
+            .await
+            .unwrap();
         let result = Config::load(Some(&path)).await;
         let err = result.err().expect("expected error");
         assert!(
@@ -202,8 +204,7 @@ mod tests {
         let addr = Addr::parse("//x").unwrap();
         let node = Node::new_bool(true);
         let cfg = Config::load::<&std::path::Path>(None).await.unwrap();
-        let res =
-            <NonConfigurable<()> as FromNodeNoContext>::from_node(&addr, &node, &cfg).await;
+        let res = <NonConfigurable<()> as FromNodeNoContext>::from_node(&addr, &node, &cfg).await;
         assert!(res.is_ok());
     }
 }

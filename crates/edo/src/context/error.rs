@@ -272,7 +272,9 @@ mod tests {
 
     #[test]
     fn display_not_valid_source() {
-        let e = ContextError::NotValidSource { id: "bad-id".into() };
+        let e = ContextError::NotValidSource {
+            id: "bad-id".into(),
+        };
         assert_eq!(
             e.to_string(),
             "'bad-id' is not a valid block id for a source definition"

@@ -172,10 +172,7 @@ mod tests {
     fn ordering_is_lexicographic_segmentwise() {
         let mut v = vec![addr("//b/a"), addr("//a/z"), addr("//a/a")];
         v.sort();
-        assert_eq!(
-            v,
-            vec![addr("//a/a"), addr("//a/z"), addr("//b/a")]
-        );
+        assert_eq!(v, vec![addr("//a/a"), addr("//a/z"), addr("//b/a")]);
     }
 
     #[test]

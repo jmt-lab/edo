@@ -3,10 +3,6 @@
 //! Handles running a single transform, catching failures, and prompting the
 //! user with options to view logs, retry, open a shell, or abort.
 
-use std::fs::read_to_string;
-use dialoguer::{Editor, Select};
-use snafu::ResultExt;
-use tracing_indicatif::suspend_tracing_indicatif;
 use super::{Result, error};
 use crate::{
     context::{Handle, Log},
@@ -14,6 +10,10 @@ use crate::{
     storage::Artifact,
     transform::{Transform, TransformStatus},
 };
+use dialoguer::{Editor, Select};
+use snafu::ResultExt;
+use std::fs::read_to_string;
+use tracing_indicatif::suspend_tracing_indicatif;
 
 /// Executes a transform with interactive error recovery.
 ///
@@ -68,12 +68,11 @@ pub async fn execute(
                         let ans = options[index];
                         match ans {
                             "view log" => {
-                                let log_text = read_to_string(
-                                    log_file
-                                        .as_ref()
-                                        .expect("log_file is Some when 'view log' option is present"),
-                                )
-                                .context(error::IoSnafu)?;
+                                let log_text =
+                                    read_to_string(log_file.as_ref().expect(
+                                        "log_file is Some when 'view log' option is present",
+                                    ))
+                                    .context(error::IoSnafu)?;
                                 Editor::new().edit(&log_text).context(error::InquireSnafu)?;
                                 continue 'prompt;
                             }
@@ -132,9 +131,7 @@ mod tests {
 
     use super::*;
     use crate::context::{Addr, Context, LogVerbosity};
-    use crate::environment::{
-        Command, EnvResult, Environment, EnvironmentImpl, Farm, FarmImpl,
-    };
+    use crate::environment::{Command, EnvResult, Environment, EnvironmentImpl, Farm, FarmImpl};
     use crate::storage::{
         Artifact as StorageArtifact, Compression, Config as ArtifactConfig, Id, MediaType,
     };
@@ -192,11 +189,7 @@ mod tests {
         async fn get_env(&self, _k: &str) -> Option<String> {
             None
         }
-        async fn setup(
-            &self,
-            _log: &Log,
-            _storage: &crate::storage::Storage,
-        ) -> EnvResult<()> {
+        async fn setup(&self, _log: &Log, _storage: &crate::storage::Storage) -> EnvResult<()> {
             Ok(())
         }
         async fn up(&self, _log: &Log) -> EnvResult<()> {
@@ -217,22 +210,10 @@ mod tests {
         async fn read(&self, _p: &Path, _w: Writer) -> EnvResult<()> {
             Ok(())
         }
-        async fn cmd(
-            &self,
-            _log: &Log,
-            _id: &Id,
-            _p: &Path,
-            _c: &str,
-        ) -> EnvResult<bool> {
+        async fn cmd(&self, _log: &Log, _id: &Id, _p: &Path, _c: &str) -> EnvResult<bool> {
             Ok(true)
         }
-        async fn run(
-            &self,
-            _log: &Log,
-            _id: &Id,
-            _p: &Path,
-            _c: &Command,
-        ) -> EnvResult<bool> {
+        async fn run(&self, _log: &Log, _id: &Id, _p: &Path, _c: &Command) -> EnvResult<bool> {
             Ok(true)
         }
         fn shell(&self, _p: &Path) -> EnvResult<()> {
@@ -244,18 +225,10 @@ mod tests {
 
     #[async_trait]
     impl FarmImpl for MiniFarmImpl {
-        async fn setup(
-            &self,
-            _log: &Log,
-            _storage: &crate::storage::Storage,
-        ) -> EnvResult<()> {
+        async fn setup(&self, _log: &Log, _storage: &crate::storage::Storage) -> EnvResult<()> {
             Ok(())
         }
-        async fn create(
-            &self,
-            _log: &Log,
-            _p: &Path,
-        ) -> EnvResult<Environment> {
+        async fn create(&self, _log: &Log, _p: &Path) -> EnvResult<Environment> {
             Ok(Environment::new(MiniEnvImpl))
         }
     }
@@ -291,11 +264,7 @@ mod tests {
         async fn depends(&self) -> TransformResult<Vec<Addr>> {
             Ok(Vec::new())
         }
-        async fn prepare(
-            &self,
-            _log: &Log,
-            _ctx: &Handle,
-        ) -> TransformResult<()> {
+        async fn prepare(&self, _log: &Log, _ctx: &Handle) -> TransformResult<()> {
             Ok(())
         }
         async fn stage(
@@ -334,16 +303,9 @@ mod tests {
         // No build cache is registered → `upload_build` is a silent no-op,
         // so a Success path must still return the artifact cleanly.
         let handle = ctx.get_handle();
-        let log = handle
-            .log()
-            .create("execute-test")
-            .await
-            .expect("log");
+        let log = handle.log().create("execute-test").await.expect("log");
         let farm = Farm::new(MiniFarmImpl);
-        let env = farm
-            .create(&log, Path::new("/"))
-            .await
-            .expect("env");
+        let env = farm.create(&log, Path::new("/")).await.expect("env");
         let transform = Transform::new(SuccessTransform {
             digest: "deadbeef".to_string(),
         });
@@ -352,6 +314,6 @@ mod tests {
             .await
             .expect("execute success");
         assert_eq!(artifact.config().id().digest(), "deadbeef");
-        assert_eq!(artifact.config().id().name(), "exec-mock");
+        assert_eq!(artifact.config().id().name(), "exec_mock");
     }
 }

@@ -91,8 +91,8 @@ impl Handle {
 #[cfg(test)]
 mod tests {
     use super::Handle;
-    use crate::context::{Addr, Config, Node, error::ContextError};
     use crate::context::logmgr::test_support::shared_log_manager;
+    use crate::context::{Addr, Config, Node, error::ContextError};
     use crate::storage::{Backend, LocalBackend, Storage};
     use std::collections::{BTreeMap, HashMap};
     use tempfile::TempDir;
@@ -158,9 +158,7 @@ mod tests {
         let addr = Addr::parse("//missing-farm").unwrap();
         let env_path = dir.path().join("env");
 
-        let result = handle
-            .create_environment(&log, &addr, &env_path)
-            .await;
+        let result = handle.create_environment(&log, &addr, &env_path).await;
 
         // `Environment` doesn't implement Debug so we can't call unwrap_err();
         // match the result manually instead.

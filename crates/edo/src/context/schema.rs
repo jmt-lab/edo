@@ -153,8 +153,8 @@ impl SchemaV1 {
 
 #[cfg(test)]
 mod test {
-    use crate::context::schema::Schema;
     use crate::context::ContextError;
+    use crate::context::schema::Schema;
 
     #[test]
     fn test_deserialize() {
@@ -247,23 +247,48 @@ path = "/tmp"
 "#;
         let Schema::V1(v1) = toml::from_str(toml_str).unwrap();
         assert_eq!(
-            v1.get_environments().unwrap().get("e").unwrap().get_id().as_deref(),
+            v1.get_environments()
+                .unwrap()
+                .get("e")
+                .unwrap()
+                .get_id()
+                .as_deref(),
             Some("environment")
         );
         assert_eq!(
-            v1.get_transforms().unwrap().get("t").unwrap().get_id().as_deref(),
+            v1.get_transforms()
+                .unwrap()
+                .get("t")
+                .unwrap()
+                .get_id()
+                .as_deref(),
             Some("transform")
         );
         assert_eq!(
-            v1.get_vendors().unwrap().get("v").unwrap().get_id().as_deref(),
+            v1.get_vendors()
+                .unwrap()
+                .get("v")
+                .unwrap()
+                .get_id()
+                .as_deref(),
             Some("vendor")
         );
         assert_eq!(
-            v1.get_requires().unwrap().get("r").unwrap().get_id().as_deref(),
+            v1.get_requires()
+                .unwrap()
+                .get("r")
+                .unwrap()
+                .get_id()
+                .as_deref(),
             Some("requires")
         );
         assert_eq!(
-            v1.get_source_caches().unwrap().get("c").unwrap().get_id().as_deref(),
+            v1.get_source_caches()
+                .unwrap()
+                .get("c")
+                .unwrap()
+                .get_id()
+                .as_deref(),
             Some("backend")
         );
     }

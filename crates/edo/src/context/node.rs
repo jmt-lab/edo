@@ -884,7 +884,10 @@ mod tests {
         let v: toml::Value = toml::from_str(r#"s = "1.2.3""#).unwrap();
         let n = Node::try_from(v.get("s").unwrap()).unwrap();
         // VersionReq is tried before Version: assert Require (not Version)
-        assert!(n.as_require().is_some(), "expected Require variant for '1.2.3'");
+        assert!(
+            n.as_require().is_some(),
+            "expected Require variant for '1.2.3'"
+        );
     }
 
     #[test]

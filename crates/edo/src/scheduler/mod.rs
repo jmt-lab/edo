@@ -3,15 +3,15 @@
 //! Orchestrates build tasks by constructing a dependency graph and executing
 //! transforms in topological order with configurable concurrency.
 
+use super::context::Context;
+use crate::context::{Addr, Config};
+use graph::Graph;
+use snafu::ResultExt;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use snafu::ResultExt;
 use tokio::fs::create_dir_all;
-use graph::Graph;
-use crate::context::{Addr, Config};
-use super::context::Context;
 
 /// Error types for the scheduler subsystem.
 pub mod error;
@@ -95,9 +95,7 @@ mod tests {
     //! imports out of the hot path); `scheduler::tests` is adjacent to
     //! `graph::tests` in the same module tree and can share.
 
-    use super::graph::tests::{
-        ensure_default_farm, register_mock, try_shared_context,
-    };
+    use super::graph::tests::{ensure_default_farm, register_mock, try_shared_context};
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::Ordering as AtomicOrdering;
@@ -152,11 +150,7 @@ mod tests {
     async fn new_ignores_malformed_workers_key() {
         // Non-int `workers` should fall back to the default of 8, not error.
         let dir = TempDir::new().unwrap();
-        let cfg = config_from_toml(
-            &dir,
-            "[scheduler]\nworkers = \"not-a-number\"\n",
-        )
-        .await;
+        let cfg = config_from_toml(&dir, "[scheduler]\nworkers = \"not-a-number\"\n").await;
         let s = Scheduler::new(dir.path(), &cfg).await.unwrap();
         assert_eq!(s.inner.workers, 8);
     }
@@ -187,13 +181,7 @@ mod tests {
         let order = Arc::new(TokioMutex::new(Vec::new()));
         let mi = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let h_c = register_mock(&ctx, "//sr/c", &[], order.clone(), mi.clone());
-        let h_b = register_mock(
-            &ctx,
-            "//sr/b",
-            &["//sr/c"],
-            order.clone(),
-            mi.clone(),
-        );
+        let h_b = register_mock(&ctx, "//sr/b", &["//sr/c"], order.clone(), mi.clone());
         let h_a = register_mock(&ctx, "//sr/a", &["//sr/b"], order, mi);
 
         let dir = TempDir::new().unwrap();

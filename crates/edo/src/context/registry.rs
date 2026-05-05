@@ -147,33 +147,33 @@ mod tests {
     use super::*;
 
     fn dummy_backend_handler() -> Arc<dyn Handler<Backend>> {
-        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
-            unreachable!("not invoked")
-        })
+        Arc::new(
+            |_addr: Addr, _node: Node, _ctx: Context| async move { unreachable!("not invoked") },
+        )
     }
 
     fn dummy_farm_handler() -> Arc<dyn Handler<Farm>> {
-        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
-            unreachable!("not invoked")
-        })
+        Arc::new(
+            |_addr: Addr, _node: Node, _ctx: Context| async move { unreachable!("not invoked") },
+        )
     }
 
     fn dummy_source_handler() -> Arc<dyn Handler<Source>> {
-        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
-            unreachable!("not invoked")
-        })
+        Arc::new(
+            |_addr: Addr, _node: Node, _ctx: Context| async move { unreachable!("not invoked") },
+        )
     }
 
     fn dummy_transform_handler() -> Arc<dyn Handler<Transform>> {
-        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
-            unreachable!("not invoked")
-        })
+        Arc::new(
+            |_addr: Addr, _node: Node, _ctx: Context| async move { unreachable!("not invoked") },
+        )
     }
 
     fn dummy_vendor_handler() -> Arc<dyn Handler<Vendor>> {
-        Arc::new(|_addr: Addr, _node: Node, _ctx: Context| async move {
-            unreachable!("not invoked")
-        })
+        Arc::new(
+            |_addr: Addr, _node: Node, _ctx: Context| async move { unreachable!("not invoked") },
+        )
     }
 
     #[test]

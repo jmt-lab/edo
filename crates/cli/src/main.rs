@@ -15,29 +15,21 @@ pub mod error {
         #[snafu(display("io error: {source}"))]
         Io { source: std::io::Error },
         #[snafu(transparent)]
-        Context {
-            source: edo::context::ContextError,
-        },
+        Context { source: edo::context::ContextError },
         #[snafu(transparent)]
-        Storage {
-            source: edo::storage::StorageError,
-        },
+        Storage { source: edo::storage::StorageError },
         #[snafu(transparent)]
         Environment {
             source: edo::environment::EnvironmentError,
         },
         #[snafu(transparent)]
-        Source {
-            source: edo::source::SourceError,
-        },
+        Source { source: edo::source::SourceError },
         #[snafu(transparent)]
         Transform {
             source: edo::transform::TransformError,
         },
         #[snafu(transparent)]
-        Core {
-            source: edo_core::error::Error,
-        },
+        Core { source: edo_core::error::Error },
     }
 }
 
