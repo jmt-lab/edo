@@ -152,11 +152,10 @@ impl Project {
                     }
                     table.insert("source".to_string(), Node::new_list(items));
                 } else {
-                    let addr =
-                        Addr::parse(&source.as_string().context(error::FieldSnafu {
-                            field: "source",
-                            type_: "string",
-                        })?)?;
+                    let addr = Addr::parse(&source.as_string().context(error::FieldSnafu {
+                        field: "source",
+                        type_: "string",
+                    })?)?;
                     table.insert(
                         "source".to_string(),
                         sources
@@ -399,12 +398,7 @@ mod tests {
         Addr::parse(s).unwrap()
     }
 
-    fn def_node(
-        id: &str,
-        kind: &str,
-        name: &str,
-        table: BTreeMap<String, Node>,
-    ) -> Node {
+    fn def_node(id: &str, kind: &str, name: &str, table: BTreeMap<String, Node>) -> Node {
         Node::new_definition(id, kind, name, table)
     }
 
@@ -698,20 +692,20 @@ at = "=1.0.0"
     #[test]
     fn walk_collects_edo_toml_from_subdirs() {
         let dir = TempDir::new().unwrap();
-        let root_content =
-            "schema-version = \"1\"\n[source.a]\nkind = \"local\"\npath = \"x\"\n";
+        let root_content = "schema-version = \"1\"\n[source.a]\nkind = \"local\"\npath = \"x\"\n";
         write_edo_toml(dir.path(), root_content);
 
         let sub = dir.path().join("sub");
         std::fs::create_dir_all(&sub).unwrap();
-        let sub_content =
-            "schema-version = \"1\"\n[source.b]\nkind = \"local\"\npath = \"y\"\n";
+        let sub_content = "schema-version = \"1\"\n[source.b]\nkind = \"local\"\npath = \"y\"\n";
         std::fs::write(sub.join("edo.toml"), sub_content).unwrap();
 
         let ns = Addr::default();
         let mut project = empty_project(dir.path());
         let mut sources = BTreeMap::new();
-        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+        project
+            .walk(&ns, dir.path(), &mut sources)
+            .expect("walk ok");
 
         assert!(
             sources.contains_key(&ns.join("a")),
@@ -730,7 +724,9 @@ at = "=1.0.0"
         let ns = Addr::default();
         let mut project = empty_project(dir.path());
         let mut sources = BTreeMap::new();
-        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+        project
+            .walk(&ns, dir.path(), &mut sources)
+            .expect("walk ok");
         assert!(sources.is_empty(), "sources must be empty for empty dir");
     }
 
@@ -742,7 +738,9 @@ at = "=1.0.0"
         let ns = Addr::default();
         let mut project = empty_project(dir.path());
         let mut sources = BTreeMap::new();
-        project.walk(&ns, dir.path(), &mut sources).expect("walk ok");
+        project
+            .walk(&ns, dir.path(), &mut sources)
+            .expect("walk ok");
         assert!(sources.is_empty(), "sources must be empty (no edo.toml)");
     }
 
@@ -762,10 +760,10 @@ at = "=1.0.0"
         let transform_node = def_node("transform", "script", "t", table);
 
         let mut project = empty_project(dir.path());
+        project.transforms.insert(addr("//t"), transform_node);
         project
-            .transforms
-            .insert(addr("//t"), transform_node);
-        project.resolve_sources(&sources).expect("resolve_sources ok");
+            .resolve_sources(&sources)
+            .expect("resolve_sources ok");
 
         let t = project.transforms.get(&addr("//t")).unwrap();
         let tbl = t.get_table().unwrap();
@@ -796,10 +794,10 @@ at = "=1.0.0"
         let transform_node = def_node("transform", "script", "t", table);
 
         let mut project = empty_project(dir.path());
+        project.transforms.insert(addr("//t"), transform_node);
         project
-            .transforms
-            .insert(addr("//t"), transform_node);
-        project.resolve_sources(&sources).expect("resolve_sources ok");
+            .resolve_sources(&sources)
+            .expect("resolve_sources ok");
 
         let t = project.transforms.get(&addr("//t")).unwrap();
         let tbl = t.get_table().unwrap();
@@ -820,13 +818,14 @@ at = "=1.0.0"
         );
         let transform_node = def_node("transform", "script", "t", table);
         let mut project = empty_project(dir.path());
-        project
-            .transforms
-            .insert(addr("//t"), transform_node);
+        project.transforms.insert(addr("//t"), transform_node);
         let result = project.resolve_sources(&BTreeMap::new());
         match result {
             Err(error::ContextError::NotValidSource { id }) => {
-                assert!(id.contains("missing"), "id should mention 'missing', got: {id}");
+                assert!(
+                    id.contains("missing"),
+                    "id should mention 'missing', got: {id}"
+                );
             }
             other => panic!("expected NotValidSource, got: {other:?}"),
         }
@@ -840,9 +839,7 @@ at = "=1.0.0"
         table.insert("source".to_string(), Node::new_int(42));
         let transform_node = def_node("transform", "script", "t", table);
         let mut project = empty_project(dir.path());
-        project
-            .transforms
-            .insert(addr("//t"), transform_node);
+        project.transforms.insert(addr("//t"), transform_node);
         let result = project.resolve_sources(&BTreeMap::new());
         assert!(
             matches!(result, Err(error::ContextError::Field { .. })),
@@ -898,8 +895,8 @@ at = "=1.0.0"
     /// non_configurable_no_context! generates a working DefinableNoContext impl.
     #[test]
     fn non_configurable_no_context_macro_compiles() {
-        use async_trait::async_trait;
         use crate::context::{Config, FromNodeNoContext};
+        use async_trait::async_trait;
 
         #[derive(Default)]
         struct DummyNoCtx;

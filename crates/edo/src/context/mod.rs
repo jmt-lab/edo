@@ -345,6 +345,24 @@ impl Context {
 }
 
 #[cfg(test)]
+impl Context {
+    /// Test-only: insert a [`Transform`] directly, bypassing the plugin registry.
+    ///
+    /// Exists because `add_transform` funnels through the registry which is
+    /// only populated by `edo-core::register_core`. The `edo` crate cannot
+    /// depend on `edo-core` (cycle), so scheduler tests instead construct
+    /// mock transforms and inject them here.
+    pub(crate) fn insert_transform_for_test(&self, addr: &Addr, transform: Transform) {
+        self.transforms.insert(addr.clone(), transform);
+    }
+
+    /// Test-only: insert a [`Farm`] directly, bypassing the plugin registry.
+    pub(crate) fn insert_farm_for_test(&self, addr: &Addr, farm: Farm) {
+        self.farms.insert(addr.clone(), farm);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     //! Integration tests for `Context`.
     //!
