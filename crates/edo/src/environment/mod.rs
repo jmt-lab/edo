@@ -72,3 +72,94 @@ impl Environment {
         Command::new(log, id, self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for [`Environment::defer_cmd`] and the [`EnvResult`] alias.
+    //!
+    //! Mock [`EnvironmentImpl`] is duplicated inline here to keep the module
+    //! self-contained, mirroring the `scheduler/graph.rs` vs
+    //! `scheduler/execute.rs` convention (the project deliberately does not
+    //! extract a shared `test_support.rs`).
+    use super::*;
+    use crate::context::Log;
+    use crate::context::test_support::shared_log_manager;
+    use crate::environment::error::EnvironmentError;
+    use async_trait::async_trait;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+
+    struct MockEnvImpl;
+
+    #[async_trait]
+    impl EnvironmentImpl for MockEnvImpl {
+        async fn expand(&self, path: &Path) -> EnvResult<PathBuf> {
+            Ok(path.to_path_buf())
+        }
+        async fn create_dir(&self, _p: &Path) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn set_env(&self, _k: &str, _v: &str) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn get_env(&self, _k: &str) -> Option<String> {
+            None
+        }
+        async fn setup(&self, _log: &Log, _storage: &Storage) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn up(&self, _log: &Log) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn down(&self, _log: &Log) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn clean(&self, _log: &Log) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn write(&self, _p: &Path, _r: Reader) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn unpack(&self, _p: &Path, _r: Reader) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn read(&self, _p: &Path, _w: Writer) -> EnvResult<()> {
+            Ok(())
+        }
+        async fn cmd(&self, _log: &Log, _id: &Id, _p: &Path, _c: &str) -> EnvResult<bool> {
+            Ok(true)
+        }
+        async fn run(&self, _log: &Log, _id: &Id, _p: &Path, _c: &Command) -> EnvResult<bool> {
+            Ok(true)
+        }
+        fn shell(&self, _p: &Path) -> EnvResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(log_manager)]
+    async fn defer_cmd_returns_command_with_default_interpreter() {
+        let dir = TempDir::new().unwrap();
+        let mgr = shared_log_manager().await;
+        let log = Log::new(&mgr, dir.path().join("defer.log")).unwrap();
+        let id = Id::builder()
+            .name("defer-test".to_string())
+            .digest("deadbeef".to_string())
+            .build();
+        let env = Environment::new(MockEnvImpl);
+
+        let cmd = env.defer_cmd(&log, &id);
+        assert_eq!(cmd.to_string(), "#!/usr/bin/env bash\n");
+    }
+
+    #[test]
+    fn env_result_is_result_alias() {
+        // Compile-time proof that `EnvResult<T>` is structurally
+        // `Result<T, EnvironmentError>` — these lines must type-check.
+        let ok: EnvResult<()> = Ok(());
+        assert!(ok.is_ok());
+        let err: EnvResult<u32> = Err(EnvironmentError::Run);
+        assert!(err.is_err());
+    }
+}
