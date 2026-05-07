@@ -447,6 +447,7 @@ impl EnvironmentImpl for Container {
                 args.push("-u".into());
                 args.push("0:0".into());
             }
+            args.push("--env".into());
             if !self.env.is_empty() {
                 args.push("--env".into());
                 let env_list = self
