@@ -112,6 +112,13 @@ impl IntoRawFd for &Log {
     }
 }
 
+#[macro_export]
+macro_rules! record {
+    ($log: ident, $action: literal, $($arg: tt)*) => {
+        $log.record($action, &format!($($arg)*))?;
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::Log;
