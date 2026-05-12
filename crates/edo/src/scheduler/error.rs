@@ -13,6 +13,8 @@ pub enum SchedulerError {
     Cache {
         source: crate::storage::StorageError,
     },
+    #[snafu(display("execution was cancelled"))]
+    Cancelled,
     #[snafu(display("errors occured during execution: {}", children.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n")))]
     Child { children: Vec<SchedulerError> },
     #[snafu(display("dependency does not exist in execution graph: {addr}"))]
@@ -47,6 +49,8 @@ pub enum SchedulerError {
     },
     #[snafu(display("could not await on a result from a non-building node"))]
     State,
+    #[snafu(display("expected a subgraph membership that did not exist"))]
+    Subgraph,
     #[snafu(display("failed to create temporary directory: {source}"))]
     TemporaryDirectory { source: std::io::Error },
     #[snafu(transparent)]
