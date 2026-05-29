@@ -1564,7 +1564,7 @@ pub(crate) mod tests {
     async fn graph_run_shared_deep_dep_respected_with_wide_root() {
         let ctx = ctx_or_skip!();
         ensure_default_farm(&ctx);
-        let order = Arc::new(TokioMutex::new(Vec::new()));
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mi = Arc::new(AtomicUsize::new(0));
 
         // Tiny delay so the cascade race window is wide enough to be
@@ -1647,7 +1647,7 @@ pub(crate) mod tests {
 
         // The smoking gun from the bottlerocket logs: `nvct` started
         // before `glibc`. With the bug, `pos(nvct) < pos(glibc)`.
-        let log = order.lock().await;
+        let log = order.lock().unwrap();
         let pos = |a: &str| -> usize {
             log.iter()
                 .position(|x| x == &Addr::parse(a).unwrap())

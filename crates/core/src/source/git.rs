@@ -1,11 +1,10 @@
 use async_trait::async_trait;
-use edo::context::{Addr, Context, FromNode, Log, Node, non_configurable};
-use edo::environment::Environment;
+use edo::context::{Context, Element, FromElement, Log};
 use edo::record;
 use edo::source::{SourceImpl, SourceResult};
 use edo::storage::{Artifact, Compression, Config, Id, MediaType, Storage};
 use edo::util::cmd_noinput;
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -13,6 +12,8 @@ use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 
 /// A source that clones a Git repository at a specific reference.
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct GitSource {
     url: String,
     reference: String,
@@ -20,44 +21,13 @@ pub struct GitSource {
 }
 
 #[async_trait]
-impl FromNode for GitSource {
+impl FromElement for GitSource {
     type Error = error::Error;
 
-    async fn from_node(_addr: &Addr, node: &Node, _: &Context) -> Result<Self, error::Error> {
-        node.validate_keys(&["url", "ref", "out"])?;
-        let url = node
-            .get("url")
-            .unwrap()
-            .as_string()
-            .context(error::FieldSnafu {
-                field: "url",
-                type_: "string",
-            })?;
-        let reference = node
-            .get("ref")
-            .unwrap()
-            .as_string()
-            .context(error::FieldSnafu {
-                field: "ref",
-                type_: "string",
-            })?;
-        let out = node
-            .get("out")
-            .unwrap()
-            .as_string()
-            .context(error::FieldSnafu {
-                field: "out",
-                type_: "string",
-            })?;
-        Ok(Self {
-            url,
-            reference,
-            out: PathBuf::from(out),
-        })
+    async fn new(element: &Element, _: &Context) -> Result<Self, error::Error> {
+        element.get().map_err(|e| e.into())
     }
 }
-
-non_configurable!(GitSource, error::Error);
 
 #[async_trait]
 impl SourceImpl for GitSource {
@@ -160,7 +130,10 @@ impl SourceImpl for GitSource {
 }
 
 pub mod error {
-    use edo::{context::error::ContextError, source::SourceError};
+    use edo::{
+        context::{Addr, error::ContextError},
+        source::SourceError,
+    };
     use snafu::Snafu;
 
     #[derive(Snafu, Debug)]
@@ -168,8 +141,11 @@ pub mod error {
     pub enum Error {
         #[snafu(display("failed to archive git repository: {source}"))]
         Archive { source: std::io::Error },
-        #[snafu(display("git source definition field '{field}' should be a '{type_}'"))]
-        Field { field: String, type_: String },
+        #[snafu(display("invalid git source definition for {addr}: {source}"))]
+        Invalid {
+            addr: Addr,
+            source: serde_json::Error,
+        },
         #[snafu(display("failed to invoke git cli: {source}"))]
         Git { source: std::io::Error },
         #[snafu(transparent)]
