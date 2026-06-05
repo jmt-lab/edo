@@ -114,7 +114,7 @@ impl TransformImpl for ScriptTransform {
             .digest(digest)
             .maybe_arch(self.options.arch.clone())
             .build();
-        trace!(component = "transform", type = "script", "id is calculated to be {id}");
+                trace!(subsystem = "transform", component = "script", id = %id, "calculated id");
         Ok(id.clone())
     }
 
@@ -144,7 +144,14 @@ impl TransformImpl for ScriptTransform {
                 .get(&dep)
                 .context(error::NotFoundSnafu { addr: dep.clone() })?;
             let id = t.get_unique_id(ctx).await?;
-            trace!(component = "transform", type = "script", "staging dependency {dep} with id {id}");
+                        trace!(
+                subsystem = "transform",
+                component = "script",
+                op = "stage",
+                addr = %dep,
+                id = %id,
+                "staging dependency"
+            );
             let artifact = ctx.storage().safe_open(&id).await?;
             for layer in artifact.layers() {
                 let reader = ctx.storage().safe_read(layer).await?;
@@ -153,7 +160,10 @@ impl TransformImpl for ScriptTransform {
                         env.unpack_stream(build_root, reader).await?;
                     }
                     _ => {
-                        warn!(
+                                                warn!(
+                            subsystem = "transform",
+                            component = "script",
+                            media_type = ?layer.media_type(),
                             "skipping stage for dependency layer that we do not know how to stage"
                         );
                     }
@@ -165,7 +175,13 @@ impl TransformImpl for ScriptTransform {
         for source_list in self.sources.values() {
             for source in source_list {
                 let id = source.get_unique_id().await?;
-                trace!(component = "transform", type = "script", "staging source {id}");
+                                trace!(
+                    subsystem = "transform",
+                    component = "script",
+                    op = "stage",
+                    id = %id,
+                    "staging source"
+                );
                 env.stage(
                     ctx,
                     ArtifactStageOptions::builder()

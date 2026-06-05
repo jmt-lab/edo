@@ -33,6 +33,7 @@ impl Checkout {
     pub async fn run(&self, args: Args) -> Result<()> {
         let ctx = super::create_context(
             &args,
+            &self.addr,
             self.args
                 .clone()
                 .map(HashMap::from_iter)
@@ -65,7 +66,10 @@ impl Checkout {
                     archive.unpack(&self.output).await.context(error::IoSnafu)?;
                 }
                 value => {
-                    tracing::error!(
+                    tracing::warn!(
+                        subsystem = "transform",
+                        component = "checkout",
+                        media_type = %value,
                         "skipping artifact layer with media_type {value} as we do not know how to extract it"
                     );
                 }
