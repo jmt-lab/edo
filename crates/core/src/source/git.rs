@@ -34,7 +34,12 @@ impl FromElement for GitSource {
 impl SourceImpl for GitSource {
     async fn get_unique_id(&self) -> SourceResult<Id> {
         let id = Id::builder()
-            .name(format!("{}@{}", self.url, self.reference))
+            .name(format!(
+                "{}@{}-{:?}",
+                self.url,
+                self.reference,
+                self.out.as_ref().unwrap_or_default()
+            ))
             .digest(base16::encode_lower(self.reference.as_bytes()))
             .build();
         trace!(subsystem = "source", component = "git", id = %id, "calculated id");
@@ -111,7 +116,7 @@ impl SourceImpl for GitSource {
             storage.safe_save(&artifact).await?;
             Ok(artifact.clone())
         }
-                .instrument(info_span!(
+        .instrument(info_span!(
             "source-fetch",
             subsystem = "source",
             component = "git",

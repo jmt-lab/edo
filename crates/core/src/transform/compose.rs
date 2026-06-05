@@ -45,17 +45,19 @@ impl TransformImpl for ComposeTransform {
         let mut depend = self.depends.clone();
         depend.sort();
         for depend in depend.iter() {
+            // Use the cached lookup so a shared transitive dependency is
+            // hashed at most once per scheduler run.
             let t = ctx.get(depend).context(error::NotFoundSnafu {
                 addr: depend.clone(),
             })?;
-            let id = t.get_unique_id(ctx).await?;
+            let id = t.cached_unique_id(ctx, depend).await?;
             hash.update(id.digest().as_bytes());
         }
         let hash_bytes = hash.finalize();
         let digest = base16::encode_lower(hash_bytes.as_bytes());
 
         let id = Id::builder().name(self.addr.to_id()).digest(digest).build();
-                trace!(subsystem = "transform", component = "compose", id = %id, "calculated id");
+        trace!(subsystem = "transform", component = "compose", id = %id, "calculated id");
         Ok(id.clone())
     }
 
@@ -77,8 +79,8 @@ impl TransformImpl for ComposeTransform {
             let t = ctx
                 .get(&dep)
                 .context(error::NotFoundSnafu { addr: dep.clone() })?;
-            let id = t.get_unique_id(ctx).await?;
-                        trace!(
+            let id = t.cached_unique_id(ctx, &dep).await?;
+            trace!(
                 subsystem = "transform",
                 component = "compose",
                 op = "stage",
