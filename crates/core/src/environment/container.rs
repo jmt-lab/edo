@@ -105,7 +105,11 @@ impl FromElement for ContainerFarm {
 impl FarmImpl for ContainerFarm {
     async fn setup(&self, log: &Log, storage: &Storage) -> EnvResult<()> {
         // Fetch our source image
-                trace!(subsystem = "environment", component = "container", "fetching image for environments");
+        trace!(
+            subsystem = "environment",
+            component = "container",
+            "fetching image for environments"
+        );
         let artifact = self
             .source
             .cache(log, storage)
@@ -122,7 +126,11 @@ impl FarmImpl for ContainerFarm {
                 .replace('/', "-")
         );
         // First we want to check if the image already exists, if so skip the next step
-                trace!(subsystem = "environment", component = "container", "check if the image is already loaded into the container runtime");
+        trace!(
+            subsystem = "environment",
+            component = "container",
+            "check if the image is already loaded into the container runtime"
+        );
         let cli = self.config.cli.as_ref().unwrap();
         if cmd_nulled(
             ".",
@@ -132,7 +140,7 @@ impl FarmImpl for ContainerFarm {
         )
         .context(error::RuntimeSnafu)?
         {
-                        debug!(
+            debug!(
                 subsystem = "environment",
                 component = "container",
                 op = "image-load",
@@ -198,7 +206,7 @@ impl FarmImpl for ContainerFarm {
     }
 
     async fn create(&self, _log: &Log, path: &Path) -> EnvResult<Environment> {
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             path = %path.display(),
@@ -268,7 +276,7 @@ impl EnvironmentImpl for Container {
     }
 
     async fn set_env(&self, key: &str, value: &str) -> EnvResult<()> {
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "set-env",
@@ -287,7 +295,7 @@ impl EnvironmentImpl for Container {
     async fn setup(&self, log: &Log, _storage: &Storage) -> EnvResult<()> {
         // make the directory we want exists
         if !self.path.exists() {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "container",
                 op = "create-dir",
@@ -356,7 +364,7 @@ impl EnvironmentImpl for Container {
             self.running.store(true, Ordering::SeqCst);
             Ok::<(), error::Error>(())
         }
-                .instrument(info_span!(
+        .instrument(info_span!(
             "container-up",
             subsystem = "environment",
             component = "container"
@@ -400,7 +408,7 @@ impl EnvironmentImpl for Container {
     async fn create_dir(&self, path: &Path) -> EnvResult<()> {
         let path = self.local_path(&path);
         let path = self.path.join(path);
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "create-dir",
@@ -423,7 +431,7 @@ impl EnvironmentImpl for Container {
                     .context(error::CreateDirectorySnafu)?;
             }
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "write-file",
@@ -450,7 +458,7 @@ impl EnvironmentImpl for Container {
                     .context(error::CreateDirectorySnafu)?;
             }
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "write-file",
@@ -474,7 +482,7 @@ impl EnvironmentImpl for Container {
                 .await
                 .context(error::CreateDirectorySnafu)?;
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "unpack",
@@ -501,7 +509,7 @@ impl EnvironmentImpl for Container {
             }
         );
         if file_path.is_file() {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "container",
                 op = "read-file",
@@ -513,7 +521,7 @@ impl EnvironmentImpl for Container {
                 .await
                 .context(error::ReadFileSnafu)?;
         } else {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "container",
                 op = "archive",
@@ -576,7 +584,7 @@ impl EnvironmentImpl for Container {
 
     async fn execute(&self, log: &Log, id: &Id, path: &Path, cmd: &str) -> EnvResult<bool> {
         let work_dir = Path::new("/root").join(path);
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "container",
             op = "exec",
@@ -614,7 +622,7 @@ impl EnvironmentImpl for Container {
             edo::util::cmd_noinput(".", log, cli, run_args, &from_dash(&self.env))
                 .context(error::RuntimeSnafu)
         }
-                .instrument(info_span!(
+        .instrument(info_span!(
             "container-exec",
             subsystem = "environment",
             component = "container",

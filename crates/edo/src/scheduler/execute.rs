@@ -87,9 +87,7 @@ pub async fn execute(
                         ctx.console().emit(crate::console::ConsoleEvent::diag(
                             crate::console::event::Severity::Warn,
                             "transform",
-                            format!(
-                                "{addr}: retry not available for this failure; aborting"
-                            ),
+                            format!("{addr}: retry not available for this failure; aborting"),
                         ));
                         ctx.cancellation().cancel();
                         result = error::PassthroughSnafu {
@@ -257,9 +255,15 @@ mod tests {
         let env = farm.create(&log, Path::new("/")).await.expect("env");
         let transform = success_transform("deadbeef");
 
-        let artifact = execute(&log, &handle, &Addr::parse("//exec/test").unwrap(), &transform, &env)
-            .await
-            .expect("execute success");
+        let artifact = execute(
+            &log,
+            &handle,
+            &Addr::parse("//exec/test").unwrap(),
+            &transform,
+            &env,
+        )
+        .await
+        .expect("execute success");
         assert_eq!(artifact.config().id().digest(), "deadbeef");
         assert_eq!(artifact.config().id().name(), "exec_mock");
     }

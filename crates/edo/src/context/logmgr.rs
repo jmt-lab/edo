@@ -75,9 +75,7 @@ use snafu::ResultExt;
 use tokio::fs::{create_dir_all, remove_dir_all};
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{
-    Layer, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt,
-};
+use tracing_subscriber::{Layer, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub use super::Log;
 use super::{ContextResult as Result, error};

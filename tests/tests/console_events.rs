@@ -44,8 +44,8 @@ fn event_log_path(fx: &Fixture) -> PathBuf {
 }
 
 fn read_events(path: &PathBuf) -> Vec<Value> {
-    let raw = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let raw =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     raw.lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str::<Value>(l).expect("event line is valid JSON"))
@@ -65,7 +65,11 @@ fn jsonl_sink_writes_canonical_event_sequence() {
     run_with_jsonl(&fx, &["run", "//hello_local/emit"]);
 
     let path = event_log_path(&fx);
-    assert!(path.exists(), "events.jsonl should exist at {}", path.display());
+    assert!(
+        path.exists(),
+        "events.jsonl should exist at {}",
+        path.display()
+    );
 
     let events = read_events(&path);
     assert!(!events.is_empty(), "events.jsonl should not be empty");
@@ -77,36 +81,72 @@ fn jsonl_sink_writes_canonical_event_sequence() {
     // follow, in that order, but other events (e.g. zero-farm fixtures
     // would skip the per-farm pair) may sit between. We assert
     // ordering rather than fixed positions.
-    assert_eq!(kinds.first().copied(), Some("session-started"), "kinds: {kinds:?}");
-    assert_eq!(kinds.get(1).copied(), Some("project-loaded"), "kinds: {kinds:?}");
-    assert_eq!(kinds.last().copied(), Some("build-finished"), "kinds: {kinds:?}");
+    assert_eq!(
+        kinds.first().copied(),
+        Some("session-started"),
+        "kinds: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.get(1).copied(),
+        Some("project-loaded"),
+        "kinds: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.last().copied(),
+        Some("build-finished"),
+        "kinds: {kinds:?}"
+    );
     let pos = |name: &str| kinds.iter().position(|k| *k == name);
     let env_start = pos("env-setup-started").expect("env-setup-started present");
     let env_end = pos("env-setup-finished").expect("env-setup-finished present");
     let build_start = pos("build-started").expect("build-started present");
-    assert!(env_start < env_end, "env-setup-started before env-setup-finished");
-    assert!(env_end < build_start, "env-setup-finished before build-started");
+    assert!(
+        env_start < env_end,
+        "env-setup-started before env-setup-finished"
+    );
+    assert!(
+        env_end < build_start,
+        "env-setup-finished before build-started"
+    );
     assert!(env_start > 1, "env-setup-started after the prologue");
 
     // session-started carries provenance: edo_version (string), target
     // (string matching what we asked for), started_at_unix (number).
     let session = &events[0];
-    assert!(session["edo_version"].is_string(), "session-started: {session}");
-    assert_eq!(session["target"], Value::String("//hello_local/emit".into()));
-    assert!(session["started_at_unix"].is_number(), "session-started: {session}");
+    assert!(
+        session["edo_version"].is_string(),
+        "session-started: {session}"
+    );
+    assert_eq!(
+        session["target"],
+        Value::String("//hello_local/emit".into())
+    );
+    assert!(
+        session["started_at_unix"].is_number(),
+        "session-started: {session}"
+    );
 
     // project-loaded carries counts and the locked flag.
     let project = &events[1];
     assert!(project["root"].is_string(), "project-loaded: {project}");
-    assert!(project["transforms"].is_number(), "project-loaded: {project}");
+    assert!(
+        project["transforms"].is_number(),
+        "project-loaded: {project}"
+    );
     assert!(project["locked"].is_boolean(), "project-loaded: {project}");
 
     // env-setup-started carries `total` (number of farms).
     let env_started = &events[env_start];
-    assert!(env_started["total"].is_number(), "env-setup-started: {env_started}");
+    assert!(
+        env_started["total"].is_number(),
+        "env-setup-started: {env_started}"
+    );
     // env-setup-finished carries `elapsed_ms`.
     let env_finished = &events[env_end];
-    assert!(env_finished["elapsed_ms"].is_number(), "env-setup-finished: {env_finished}");
+    assert!(
+        env_finished["elapsed_ms"].is_number(),
+        "env-setup-finished: {env_finished}"
+    );
 
     // build-started carries a numeric `total` and string `root`.
     let started = &events[build_start];
@@ -114,15 +154,25 @@ fn jsonl_sink_writes_canonical_event_sequence() {
     assert!(started["root"].is_string(), "build-started: {started}");
 
     // We expect at least one node-level event in between (queued or cache-hit).
-    let saw_node_activity = kinds
-        .iter()
-        .any(|k| matches!(*k, "node-queued" | "node-cache-hit" | "node-phase" | "node-finished"));
-    assert!(saw_node_activity, "expected node activity, kinds: {kinds:?}");
+    let saw_node_activity = kinds.iter().any(|k| {
+        matches!(
+            *k,
+            "node-queued" | "node-cache-hit" | "node-phase" | "node-finished"
+        )
+    });
+    assert!(
+        saw_node_activity,
+        "expected node activity, kinds: {kinds:?}"
+    );
 
     // Final summary is green.
     let finished = events.last().unwrap();
     assert_eq!(finished["ok"], Value::Bool(true), "finished: {finished}");
-    assert_eq!(finished["failed"], Value::Array(vec![]), "finished: {finished}");
+    assert_eq!(
+        finished["failed"],
+        Value::Array(vec![]),
+        "finished: {finished}"
+    );
     assert!(finished["elapsed_ms"].is_number(), "finished: {finished}");
 }
 
@@ -186,7 +236,11 @@ fn explicit_event_log_path_is_honored() {
     c.arg("run").arg("//hello_local/emit");
     c.assert().success();
 
-    assert!(custom.exists(), "custom event log {} not created", custom.display());
+    assert!(
+        custom.exists(),
+        "custom event log {} not created",
+        custom.display()
+    );
     assert!(
         !event_log_path(&fx).exists(),
         "default events.jsonl should NOT be created when an explicit path is given"

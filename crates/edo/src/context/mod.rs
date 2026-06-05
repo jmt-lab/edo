@@ -454,8 +454,7 @@ impl Context {
             // sinks see a balanced started/finished pair even on
             // failure. The build won't start in this case.
             if let Err(e) = result {
-                let elapsed_ms =
-                    phase_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                let elapsed_ms = phase_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                 self.emit(ConsoleEvent::EnvSetupFinished { elapsed_ms });
                 return Err(e.into());
             }

@@ -26,7 +26,7 @@ impl FarmImpl for LocalFarm {
     }
 
     async fn create(&self, _log: &Log, path: &Path) -> EnvResult<Environment> {
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             path = %path.display(),
@@ -75,7 +75,7 @@ impl EnvironmentImpl for LocalEnv {
     }
 
     async fn set_env(&self, key: &str, value: &str) -> EnvResult<()> {
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "set-env",
@@ -94,7 +94,7 @@ impl EnvironmentImpl for LocalEnv {
     async fn setup(&self, log: &Log, _storage: &Storage) -> EnvResult<()> {
         // make sure the directory we want exists
         if !self.path.exists() {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "local",
                 op = "create-dir",
@@ -128,7 +128,7 @@ impl EnvironmentImpl for LocalEnv {
     async fn clean(&self, log: &Log) -> EnvResult<()> {
         // Delete the directory
         if self.path.exists() {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "local",
                 op = "remove-dir",
@@ -150,7 +150,7 @@ impl EnvironmentImpl for LocalEnv {
 
     async fn create_dir(&self, path: &Path) -> EnvResult<()> {
         let path = self.path.join(path);
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "create-dir",
@@ -172,7 +172,7 @@ impl EnvironmentImpl for LocalEnv {
                     .context(error::CreateDirectorySnafu)?;
             }
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "write-file",
@@ -194,7 +194,7 @@ impl EnvironmentImpl for LocalEnv {
                     .context(error::CreateDirectorySnafu)?;
             }
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "write-file",
@@ -217,7 +217,7 @@ impl EnvironmentImpl for LocalEnv {
                 .await
                 .context(error::CreateDirectorySnafu)?;
         }
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "unpack",
@@ -256,7 +256,7 @@ impl EnvironmentImpl for LocalEnv {
             }
         );
         if file_path.is_file() {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "local",
                 op = "read-file",
@@ -268,7 +268,7 @@ impl EnvironmentImpl for LocalEnv {
                 .await
                 .context(error::ReadFileSnafu)?;
         } else {
-                        trace!(
+            trace!(
                 subsystem = "environment",
                 component = "local",
                 op = "archive",
@@ -287,7 +287,7 @@ impl EnvironmentImpl for LocalEnv {
 
     async fn execute(&self, log: &Log, id: &Id, path: &Path, cmd: &str) -> EnvResult<bool> {
         let work_dir = self.path.join(path);
-                trace!(
+        trace!(
             subsystem = "environment",
             component = "local",
             op = "exec",
@@ -299,7 +299,7 @@ impl EnvironmentImpl for LocalEnv {
             cmd_noinput(&work_dir, log, "sh", ["-c", cmd], &from_dash(&self.env))
                 .context(error::FailedSnafu)
         }
-                .instrument(info_span!(
+        .instrument(info_span!(
             "local-exec",
             subsystem = "environment",
             component = "local",

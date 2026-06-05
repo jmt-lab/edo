@@ -14,8 +14,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::event::{ConsoleEvent, Phase, Severity};
 use super::Sink;
+use super::event::{ConsoleEvent, Phase, Severity};
 
 /// User-selectable console mode.
 ///
@@ -90,7 +90,11 @@ impl Sink for JsonlSink {
         let line = match serde_json::to_string(event) {
             Ok(l) => l,
             Err(e) => {
-                tracing::warn!(subsystem = "console", op = "serialise", "failed to serialise event: {e}");
+                tracing::warn!(
+                    subsystem = "console",
+                    op = "serialise",
+                    "failed to serialise event: {e}"
+                );
                 return;
             }
         };
@@ -99,7 +103,11 @@ impl Sink for JsonlSink {
             Err(p) => p.into_inner(),
         };
         if let Err(e) = writeln!(guard.writer, "{line}") {
-            tracing::warn!(subsystem = "console", op = "write", "failed to write event: {e}");
+            tracing::warn!(
+                subsystem = "console",
+                op = "write",
+                "failed to write event: {e}"
+            );
             return;
         }
         // Flush on `BuildFinished` and on every `Failed` so the file is
@@ -227,11 +235,7 @@ impl Sink for SimpleSink {
                 if *ok {
                     writeln!(h, "BUILD ok ({elapsed_ms} ms)")
                 } else {
-                    writeln!(
-                        h,
-                        "BUILD failed ({elapsed_ms} ms, {} failed)",
-                        failed.len()
-                    )
+                    writeln!(h, "BUILD failed ({elapsed_ms} ms, {} failed)", failed.len())
                 }
             }
         };

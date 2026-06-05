@@ -135,11 +135,13 @@ impl BuildState {
                 self.total = *total;
             }
             ConsoleEvent::NodeQueued { addr, id } => {
-                self.active.entry(addr.clone()).or_insert_with(|| ActiveTask {
-                    phase: None,
-                    started: Instant::now(),
-                    id: id.clone(),
-                });
+                self.active
+                    .entry(addr.clone())
+                    .or_insert_with(|| ActiveTask {
+                        phase: None,
+                        started: Instant::now(),
+                        id: id.clone(),
+                    });
             }
             ConsoleEvent::NodeCacheHit { addr, id: _ } => {
                 self.active.remove(addr);
@@ -147,11 +149,14 @@ impl BuildState {
                 self.cache_hits += 1;
             }
             ConsoleEvent::NodePhase { addr, phase } => {
-                let entry = self.active.entry(addr.clone()).or_insert_with(|| ActiveTask {
-                    phase: None,
-                    started: Instant::now(),
-                    id: None,
-                });
+                let entry = self
+                    .active
+                    .entry(addr.clone())
+                    .or_insert_with(|| ActiveTask {
+                        phase: None,
+                        started: Instant::now(),
+                        id: None,
+                    });
                 entry.phase = Some(*phase);
             }
             ConsoleEvent::NodeFinished { addr, ok, .. } => {
@@ -165,7 +170,11 @@ impl BuildState {
             ConsoleEvent::Diagnostic { .. } => {
                 // Diagnostics are scrolled, not aggregated.
             }
-            ConsoleEvent::BuildFinished { ok, failed, elapsed_ms } => {
+            ConsoleEvent::BuildFinished {
+                ok,
+                failed,
+                elapsed_ms,
+            } => {
                 self.done = true;
                 self.ok = *ok;
                 self.elapsed_ms = *elapsed_ms;

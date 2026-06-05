@@ -37,7 +37,9 @@ pub mod error {
 
 /// Parse `--console-mode` from a CLI string.
 fn parse_console_mode(s: &str) -> std::result::Result<ConsoleMode, String> {
-    ConsoleMode::from_str(s).map_err(|v| format!("unknown console mode '{v}' (expected one of auto, full, simple, none)"))
+    ConsoleMode::from_str(s).map_err(|v| {
+        format!("unknown console mode '{v}' (expected one of auto, full, simple, none)")
+    })
 }
 
 #[derive(Parser, Debug, Clone)]

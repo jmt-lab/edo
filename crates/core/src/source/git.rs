@@ -38,7 +38,10 @@ impl SourceImpl for GitSource {
                 "{}@{}-{:?}",
                 self.url,
                 self.reference,
-                self.out.as_ref().unwrap_or_default()
+                self.out
+                    .as_ref()
+                    .and_then(|x| x.to_str())
+                    .unwrap_or_default()
             ))
             .digest(base16::encode_lower(self.reference.as_bytes()))
             .build();

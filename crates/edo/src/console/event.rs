@@ -151,17 +151,13 @@ pub enum ConsoleEvent {
     /// [`Self::BuildStarted`] so consumers can show "setting up
     /// environments \u2026" between project load and the scheduler
     /// kicking off node activity.
-    EnvSetupStarted {
-        total: usize,
-    },
+    EnvSetupStarted { total: usize },
     /// A single farm's `setup()` is starting. Useful so the canvas can
     /// surface the in-flight farm address (a container farm's setup
     /// can take seconds to minutes — image pull + load + tag — and
     /// without this event the UI would show a blank screen between
     /// `ProjectLoaded` and `BuildStarted`).
-    EnvSetupFarmStarted {
-        addr: Addr,
-    },
+    EnvSetupFarmStarted { addr: Addr },
     /// A single farm's `setup()` has returned. `ok=false` means setup
     /// failed; `Context::run` will propagate the error and the build
     /// won't start.
@@ -174,32 +170,18 @@ pub enum ConsoleEvent {
     /// Always emitted, even if zero farms were registered, so consumers
     /// have a definite "setup phase ended" signal before
     /// [`Self::BuildStarted`].
-    EnvSetupFinished {
-        elapsed_ms: u64,
-    },
+    EnvSetupFinished { elapsed_ms: u64 },
     /// Marks the start of a top-level build for `root`. Emitted once
     /// before any node activity. `total` is the count of nodes in the
     /// reachable subgraph (post transitive reduction).
-    BuildStarted {
-        root: Addr,
-        total: usize,
-    },
+    BuildStarted { root: Addr, total: usize },
     /// A node has been added to the active subgraph. Emitted by
     /// `Graph::add` after the indegree template is computed.
-    NodeQueued {
-        addr: Addr,
-        id: Option<Id>,
-    },
+    NodeQueued { addr: Addr, id: Option<Id> },
     /// A node hit the build cache and will not run.
-    NodeCacheHit {
-        addr: Addr,
-        id: Id,
-    },
+    NodeCacheHit { addr: Addr, id: Id },
     /// A node entered a new lifecycle phase.
-    NodePhase {
-        addr: Addr,
-        phase: Phase,
-    },
+    NodePhase { addr: Addr, phase: Phase },
     /// A node finished. `ok=false` means the transform errored; the
     /// scheduler will short-circuit.
     NodeFinished {
