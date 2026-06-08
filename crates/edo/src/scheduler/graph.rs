@@ -1022,6 +1022,7 @@ pub(crate) mod tests {
             let deps = deps.clone();
             m.expect_depends().returning(move || Ok(deps.clone()));
         }
+        m.expect_needs_prepare().returning(|_ctx| Ok(true));
         {
             let prepare_called = prepare_called.clone();
             m.expect_prepare().returning(move |_log, _ctx| {
