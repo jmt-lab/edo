@@ -155,14 +155,13 @@ impl Inner {
         let mut graph = Graph::new(self.workers);
         graph.add(ctx, addr).await?;
 
-        // Emit BuildStarted *between* `add` and `fetch` so it sequences
-        // ahead of every NodeQueued / NodeCacheHit event (those fire
-        // inside `fetch`). Total is the reachable subgraph size, which
-        // is only known after `add` completes.
-        ctx.emit(crate::console::ConsoleEvent::BuildStarted {
-            root: addr.clone(),
-            total: graph.subgraph_size(addr),
-        });
+        // Emit StartBuild *between* `add` and `fetch` so it sequences
+        // ahead of every task start event (those fire inside `fetch`).
+        // Total is the reachable subgraph size, which is only known
+        // after `add` completes.
+        if let Some(c) = crate::tui::Console::global() {
+            c.start_build(addr, graph.subgraph_size(addr)).await;
+        }
 
         graph.fetch(ctx).await?;
         let graph_ref = Arc::new(graph);

@@ -48,12 +48,9 @@ impl SourceImpl for ImageSource {
     async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
         let id = self.get_unique_id().await?;
         let uri = Uri::new(&self.uri).await.context(error::OciSnafu)?;
-        info!(
-            subsystem = "source",
+        edo::ui_info!(
             component = "oci",
-            op = "fetch",
-            id = %id,
-            uri = %self.uri,
+            id = id,
             "pulling oci image {}",
             self.uri
         );

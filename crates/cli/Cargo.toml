@@ -15,8 +15,10 @@ bon               = "3.9.1"
 clap              = { workspace = true }
 edo               = { path = "../edo" }
 edo-core          = { path = "../core" }
+flume = "0.12.0"
 mockall = "0.14.0"
 schemars = "1.2.1"
+semver            = { workspace = true }
 snafu             = { workspace = true }
 tokio             = { workspace = true }
 tracing           = { workspace = true }

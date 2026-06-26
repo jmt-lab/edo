@@ -67,13 +67,10 @@ impl S3Backend {
         bucket: &str,
         prefix: Option<PathBuf>,
     ) -> StorageResult<Self> {
-        info!(
-            subsystem = "storage",
+        edo::ui_info!(
             component = "s3",
-            op = "register",
-            bucket = %bucket,
-            prefix = %prefix.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-            "creating or loading s3 cache"
+            "creating or loading s3 cache for bucket {bucket}{}",
+            prefix.as_ref().map(|p| format!("/{}", p.display())).unwrap_or_default()
         );
         let client = Arc::new(Client::new(sdk_config));
         let catalog_key = if let Some(prefix) = prefix.as_ref() {
@@ -158,10 +155,8 @@ impl S3Backend {
                 return Ok(());
             }
             if attempt == MAX_ATTEMPTS {
-                error!(
-                    subsystem = "storage",
+                edo::ui_error!(
                     component = "s3",
-                    catalog_key = %self.catalog_key,
                     "lock object {}.lock did not clear after {MAX_ATTEMPTS} attempts; failing",
                     self.catalog_key,
                 );

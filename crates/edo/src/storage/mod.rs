@@ -29,6 +29,7 @@ use tokio::task::JoinError;
 use crate::util::{Reader, Writer};
 use indexmap::IndexMap;
 use snafu::ResultExt;
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -129,6 +130,11 @@ impl Inner {
             "registering an output cache"
         );
         self.output = Some(cache.clone());
+    }
+
+    // List the ids in the local cache
+    async fn safe_list(&self) -> StorageResult<BTreeSet<Id>> {
+        self.local.list().await
     }
 
     // Open an artifact in the local cache
@@ -302,11 +308,9 @@ impl Inner {
     async fn upload_build(&self, id: &Id) -> StorageResult<()> {
         // This only occurs if a build cache is registered
         if let Some(build) = self.build.as_ref() {
-            info!(
-                subsystem = "storage",
-                op = "upload",
-                target = "build-cache",
-                id = %id,
+            crate::ui_info!(
+                component = "storage",
+                id = id,
                 "build cache detected, uploading"
             );
             let artifact = self.local.open(id).await?;
@@ -320,11 +324,9 @@ impl Inner {
     async fn upload_output(&self, id: &Id) -> StorageResult<()> {
         // This only occurs if an output cache is registered
         if let Some(output) = self.output.as_ref() {
-            info!(
-                subsystem = "storage",
-                op = "upload",
-                target = "output-cache",
-                id = %id,
+            crate::ui_info!(
+                component = "storage",
+                id = id,
                 "output cache detected, uploading"
             );
             let artifact = self.local.open(id).await?;
@@ -405,6 +407,13 @@ impl Storage {
     /// **safe operation** No network IO.
     pub async fn local_blob_size(&self, digest: &str) -> StorageResult<Option<u64>> {
         self.inner.read().await.local.blob_size(digest).await
+    }
+
+    /// List the IDs in the local cache
+    /// **safe operation** This operation is safe to call in a networkless environment or in the
+    /// build stages as it will make no network calls
+    pub async fn safe_list(&self) -> StorageResult<BTreeSet<Id>> {
+        self.inner.read().await.safe_list().await
     }
 
     /// Open an artifact stored in the local cache

@@ -22,10 +22,12 @@ crossterm          = { workspace = true }
 daggy              = { workspace = true }
 dashmap            = { workspace = true }
 duct               = { workspace = true }
+flume              = { workspace = true }
 futures            = { workspace = true }
 handlebars         = { workspace = true }
 home               = { workspace = true }
 indexmap           = { workspace = true }
+jiff               = { workspace = true }
 merkle_hash        = { workspace = true }
 names              = { workspace = true }
 ocilot             = { workspace = true }

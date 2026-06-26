@@ -24,8 +24,8 @@ use super::{
     source::{Source, Vendor},
     transform::Transform,
 };
-use crate::console::{Console, ConsoleEvent, JsonlSink, SimpleSink};
 use crate::storage::{Backend, LocalBackend, Storage};
+use crate::tui;
 use dashmap::DashMap;
 use serde_json::json;
 use snafu::ResultExt;
@@ -74,25 +74,14 @@ pub use schema::*;
 
 /// Configuration for the build-event console.
 ///
-/// Determines which sinks the [`Console`] inside [`Context`] is wired with.
-/// Mapped from the CLI's `--console-mode` and `--event-log` flags by
-/// `crates/cli/src/cmd/mod.rs::create_context`.
-#[derive(Clone, Debug)]
+/// Retained as a stub so existing call sites continue to compile during
+/// the migration to the new `tui` module. The new tui has a single
+/// fixed rendering mode and no JSONL sink; this struct's fields are
+/// kept for API compatibility but are otherwise inert.
+#[derive(Clone, Debug, Default)]
 pub struct ConsoleConfig {
-    /// Renderer mode (`auto`, `full`, `simple`, `none`).
-    pub mode: crate::console::ConsoleMode,
-    /// Path to the JSONL event log (overwritten each run). `None`
-    /// disables the JSONL sink.
+    /// Path to the JSONL event log. Currently unused by the tui.
     pub event_log: Option<PathBuf>,
-}
-
-impl Default for ConsoleConfig {
-    fn default() -> Self {
-        Self {
-            mode: crate::console::ConsoleMode::Auto,
-            event_log: None,
-        }
-    }
 }
 
 /// Convenience alias for `Result<T, ContextError>`.
@@ -118,8 +107,6 @@ pub struct Context {
     storage: Storage,
     /// Log Manager
     log: LogManager,
-    /// Build-event console (typed event bus + sinks)
-    console: Console,
     /// Execution Scheduler
     scheduler: Scheduler,
     /// Registry of implemented components
@@ -143,7 +130,7 @@ impl Context {
         config: Option<ConfigPath>,
         args: HashMap<String, String>,
         verbosity: LogVerbosity,
-        console_cfg: ConsoleConfig,
+        _console_cfg: ConsoleConfig,
     ) -> ContextResult<Self>
     where
         ProjectPath: AsRef<Path>,
@@ -162,39 +149,11 @@ impl Context {
         // do not clash with other project workspaces.
         let log_path = path.join("logs");
         let log = LogManager::init(&log_path, verbosity).await?;
-        // Wire up the build-event console. The JSONL sink is on by
-        // default; disable by passing `event_log = None`.
-        let console = Console::new();
-        if let Some(jsonl_path) = &console_cfg.event_log {
-            match JsonlSink::create(jsonl_path) {
-                Ok(sink) => console.add_sink(sink),
-                Err(e) => {
-                    // Sink failure must never block a build; warn loudly
-                    // and continue with the remaining sinks.
-                    warn!(
-                        subsystem = "console",
-                        op = "open-event-log",
-                        path = %jsonl_path.display(),
-                        "failed to open event log {}: {e}", jsonl_path.display()
-                    );
-                }
-            }
-        }
-        match crate::console::sinks::resolve_mode(console_cfg.mode) {
-            crate::console::ConsoleMode::Simple => {
-                console.add_sink(SimpleSink::new());
-            }
-            crate::console::ConsoleMode::Full => {
-                // Spawn the inline ratatui canvas. Default canvas
-                // height is 8 rows; the renderer caps the active-task
-                // table internally.
-                console.install_canvas(8);
-            }
-            crate::console::ConsoleMode::None | crate::console::ConsoleMode::Auto => {
-                // `Auto` is normalised by `resolve_mode`; reaching here
-                // means stderr is non-TTY and we want no canvas.
-                // `None` means no console output at all.
-            }
+        // Install the global tui console exactly once per process.
+        // Subsequent `Context::init` calls (e.g. in tests) become a
+        // no-op so the UI task isn't spawned twice.
+        if tui::CONSOLE.get().is_none() {
+            tui::Console::new().install();
         }
         // Load the configuration
         let config = Config::load(config).await?;
@@ -222,7 +181,6 @@ impl Context {
             config: config.clone(),
             args,
             log: log.clone(),
-            console,
             storage,
             registry: Registry::default(),
             scheduler: Scheduler::new(&path.join("env"), &config).await?,
@@ -258,7 +216,6 @@ impl Context {
     pub fn get_handle(&self) -> Handle {
         Handle::new(
             self.log.clone(),
-            self.console.clone(),
             self.config.clone(),
             self.storage.clone(),
             self.transforms
@@ -279,7 +236,6 @@ impl Context {
         merged.extend(args);
         Handle::new(
             self.log.clone(),
-            self.console.clone(),
             self.config.clone(),
             self.storage.clone(),
             self.transforms
@@ -309,14 +265,9 @@ impl Context {
         &self.log
     }
 
-    /// Returns a reference to the build-event console.
-    pub fn console(&self) -> &Console {
-        &self.console
-    }
-
-    /// Convenience: emit a [`ConsoleEvent`] through the build console.
-    pub fn emit(&self, event: ConsoleEvent) {
-        self.console.emit(event);
+    /// Returns the global tui console handle, if installed.
+    pub fn console(&self) -> Option<&'static tui::Console> {
+        tui::Console::global()
     }
 
     /// Returns a reference to the execution scheduler.
@@ -455,13 +406,30 @@ impl Context {
         // loading them into the runtime; without these events the UI
         // shows a blank screen for that whole window.
         let total = self.farms.len();
-        let phase_started = std::time::Instant::now();
-        self.emit(ConsoleEvent::EnvSetupStarted { total });
+        let console = tui::Console::global();
+        if let Some(c) = console {
+            c.emit_diagnostic(
+                "environment",
+                None,
+                tui::event::Severity::Info,
+                &format!("setting up {total} environment(s)"),
+            )
+            .await;
+        }
 
         for entry in self.farms.iter() {
             let addr = entry.key().clone();
-            self.emit(ConsoleEvent::EnvSetupFarmStarted { addr: addr.clone() });
-            let started = std::time::Instant::now();
+            let id = addr.to_string();
+            if let Some(c) = console {
+                c.start_task(
+                    "environment",
+                    &id,
+                    "setup",
+                    tui::event::TaskStatus::Running,
+                    None,
+                )
+                .await;
+            }
             let result = entry
                 .setup(&log, self.storage())
                 .instrument(info_span!(
@@ -470,24 +438,21 @@ impl Context {
                     addr = %addr
                 ))
                 .await;
-            let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-            self.emit(ConsoleEvent::EnvSetupFarmFinished {
-                addr,
-                ok: result.is_ok(),
-                elapsed_ms,
-            });
+            let status = if result.is_ok() {
+                tui::event::TaskStatus::Success
+            } else {
+                tui::event::TaskStatus::Failed
+            };
+            if let Some(c) = console {
+                c.update_task("environment", &id, "setup", status, None).await;
+            }
             // Emit the phase-end event before propagating the error so
             // sinks see a balanced started/finished pair even on
             // failure. The build won't start in this case.
             if let Err(e) = result {
-                let elapsed_ms = phase_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                self.emit(ConsoleEvent::EnvSetupFinished { elapsed_ms });
                 return Err(e.into());
             }
         }
-
-        let elapsed_ms = phase_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        self.emit(ConsoleEvent::EnvSetupFinished { elapsed_ms });
         Ok(())
     }
 
@@ -510,7 +475,9 @@ impl Context {
         // Drain the inline canvas before propagating any error so the
         // user sees the final BuildFinished summary (or the env-setup
         // error chain) on a restored terminal.
-        self.console.shutdown().await;
+        if let Some(c) = tui::Console::global() {
+            c.shutdown().await;
+        }
         env_setup?;
         build_result?;
         Ok(())

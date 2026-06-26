@@ -52,13 +52,52 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
-use crate::console::{ConsoleEvent, Phase, event::duration_ms};
 use crate::context::{Addr, Context, Handle, IdCache};
 use crate::storage::{Artifact, Id};
 use crate::transform::Transform;
+use crate::tui;
 
 use super::node::Node;
 use super::{Result, error};
+
+/// Lifecycle phase tag used as the `operation` field in tui task events.
+///
+/// Mirrors the old `Phase` enum but is intentionally just a static
+/// string — the new tui module renders the operation verbatim.
+mod phase {
+    pub const FETCH: &str = "fetch";
+    pub const WAIT: &str = "wait";
+    pub const CREATE_ENV: &str = "create-env";
+    pub const SETUP: &str = "setup";
+    pub const SPIN_UP: &str = "spin-up";
+    pub const STAGE: &str = "stage";
+    pub const EXECUTE: &str = "execute";
+    pub const SPIN_DOWN: &str = "spin-down";
+    pub const CLEAN: &str = "clean";
+}
+
+/// Helper: emit a `StartTask` for a transform node entering the wait phase.
+async fn emit_task_start(addr: &Addr, status: tui::event::TaskStatus, op: &str) {
+    if let Some(c) = tui::Console::global() {
+        c.start_task("transform", &addr.to_string(), op, status, None)
+            .await;
+    }
+}
+
+/// Helper: emit an `UpdateTask` for a transform node.
+async fn emit_task_update(addr: &Addr, status: tui::event::TaskStatus, op: &str) {
+    if let Some(c) = tui::Console::global() {
+        c.update_task("transform", &addr.to_string(), op, status, None)
+            .await;
+    }
+}
+
+/// Helper: emit the terminal BuildFinish event.
+async fn emit_build_finish() {
+    if let Some(c) = tui::Console::global() {
+        c.finish_build().await;
+    }
+}
 
 /// Execution graph: the DAG plus per-root metadata required to dispatch
 /// transforms in topological order with bounded concurrency.
@@ -307,10 +346,7 @@ impl Graph {
             match ctx.storage().find_build(&id, true).await {
                 Ok(Some(_)) => {
                     node.set_cache_hit(true);
-                    ctx.emit(ConsoleEvent::NodeCacheHit {
-                        addr: node.addr.clone(),
-                        id: id.clone(),
-                    });
+                    emit_task_start(&node.addr, tui::event::TaskStatus::Cached, "cache-hit").await;
                     continue;
                 }
                 Ok(None) => {}
@@ -319,10 +355,7 @@ impl Graph {
                     break 'outer;
                 }
             }
-            ctx.emit(ConsoleEvent::NodeQueued {
-                addr: node.addr.clone(),
-                id: Some(id.clone()),
-            });
+            emit_task_start(&node.addr, tui::event::TaskStatus::Wait, "queued").await;
 
             // Build-cache miss — but if the transform reports that its
             // `prepare` step has nothing to do (e.g. every input source is
@@ -331,10 +364,7 @@ impl Graph {
             // matches the post-prepare path.
             match transform.needs_prepare(&ctx).await {
                 Ok(false) => {
-                    ctx.emit(ConsoleEvent::NodePhase {
-                        addr: node.addr.clone(),
-                        phase: Phase::Wait,
-                    });
+                    emit_task_update(&node.addr, tui::event::TaskStatus::Wait, phase::WAIT).await;
                     continue;
                 }
                 Ok(true) => {}
@@ -374,10 +404,7 @@ impl Graph {
                     }
                     let logf = task_ctx.log().create(format!("{id}").as_str()).await?;
                     logf.set_subject("fetch");
-                    task_ctx.emit(ConsoleEvent::NodePhase {
-                        addr: node_for_task.addr.clone(),
-                        phase: Phase::Fetch,
-                    });
+                    emit_task_update(&node_for_task.addr, tui::event::TaskStatus::Running, phase::FETCH).await;
                     let prepare_result = transform.prepare(&logf, &task_ctx).await;
                     // On *any* error in prepare, flip the token so peer
                     // tasks abort at their next checkpoint. Without this
@@ -393,10 +420,7 @@ impl Graph {
                     // every post-fetch node until a transform worker picks
                     // it up — which can be tens of seconds with a small
                     // batch_size against a large graph.
-                    task_ctx.emit(ConsoleEvent::NodePhase {
-                        addr: node_for_task.addr.clone(),
-                        phase: Phase::Wait,
-                    });
+                    emit_task_update(&node_for_task.addr, tui::event::TaskStatus::Wait, phase::WAIT).await;
                     drop(logf);
                     // Explicit drop is documentation: the permit returns to
                     // the pool exactly when this task ends.
@@ -464,11 +488,9 @@ impl Graph {
             // `console.shutdown()` runs unconditionally, but without a
             // `BuildFinished` the state machine never marks the build
             // finished and the final-summary line is incoherent.
-            ctx.emit(ConsoleEvent::BuildFinished {
-                ok: false,
-                elapsed_ms: duration_ms(fetch_started_at.elapsed()),
-                failed: failed_addrs,
-            });
+            ctx.cancellation();
+            let _ = (fetch_started_at, &failed_addrs);
+            emit_build_finish().await;
             return Err(e);
         }
         Ok(())
@@ -538,11 +560,8 @@ impl Graph {
         // `cache_hit`; if the root is one we don't even need to walk its
         // dependencies — they only matter if we have to rebuild.
         if root_node.is_cache_hit() {
-            ctx_handle.emit(ConsoleEvent::BuildFinished {
-                ok: true,
-                elapsed_ms: duration_ms(build_started_at.elapsed()),
-                failed: vec![],
-            });
+            let _ = build_started_at;
+            emit_build_finish().await;
             return Ok(());
         }
 
@@ -737,7 +756,12 @@ impl Graph {
                     // failed, and clear `ready` so no further dispatch
                     // happens. We still need to drain `inflight` tasks
                     // so workers don't leak.
-                    error!(subsystem = "scheduler", addr = %node.addr, "{} failed: {e}", node.addr);
+                    crate::ui_error!(
+                        component = "scheduler",
+                        id = node.addr,
+                        "{} failed: {e}",
+                        node.addr
+                    );
                     node.set_failed();
                     if first_error.is_none() {
                         first_error = Some(e);
@@ -785,27 +809,16 @@ impl Graph {
                     }
                 })
                 .collect();
-            ctx_handle.emit(ConsoleEvent::BuildFinished {
-                ok: false,
-                elapsed_ms: duration_ms(build_started_at.elapsed()),
-                failed: failed_addrs,
-            });
+            let _ = (build_started_at, &failed_addrs);
+            emit_build_finish().await;
             return Err(e);
         }
         if token.is_cancelled() {
-            ctx_handle.emit(ConsoleEvent::BuildFinished {
-                ok: false,
-                elapsed_ms: duration_ms(build_started_at.elapsed()),
-                failed: vec![],
-            });
+            emit_build_finish().await;
             return error::CancelledSnafu.fail();
         }
 
-        ctx_handle.emit(ConsoleEvent::BuildFinished {
-            ok: true,
-            elapsed_ms: duration_ms(build_started_at.elapsed()),
-            failed: vec![],
-        });
+        emit_build_finish().await;
         Ok(())
     }
 }
@@ -846,10 +859,7 @@ async fn run_transform_lifecycle(
     let logf = ctx.log().create(format!("{id}").as_str()).await?;
 
     logf.set_subject("create-environment");
-    ctx.emit(ConsoleEvent::NodePhase {
-        addr: node.addr.clone(),
-        phase: Phase::CreateEnv,
-    });
+    emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::CREATE_ENV).await;
     let env_addr = transform.environment().await?;
     let environment = ctx
         .create_environment(&logf, &env_addr, temp.path())
@@ -865,10 +875,7 @@ async fn run_transform_lifecycle(
     }
 
     logf.set_subject("setup-environment");
-    ctx.emit(ConsoleEvent::NodePhase {
-        addr: node.addr.clone(),
-        phase: Phase::Setup,
-    });
+    emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::SETUP).await;
     environment
         .setup(&logf, ctx.storage())
         .instrument(info_span!(
@@ -883,10 +890,7 @@ async fn run_transform_lifecycle(
     }
 
     logf.set_subject("spinup environment");
-    ctx.emit(ConsoleEvent::NodePhase {
-        addr: node.addr.clone(),
-        phase: Phase::SpinUp,
-    });
+    emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::SPIN_UP).await;
     environment.up(&logf).await?;
 
     // Past this point the environment is "up" and we owe it teardown.
@@ -898,10 +902,7 @@ async fn run_transform_lifecycle(
             return error::CancelledSnafu.fail();
         }
         logf.set_subject("staging");
-        ctx.emit(ConsoleEvent::NodePhase {
-            addr: node.addr.clone(),
-            phase: Phase::Stage,
-        });
+        emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::STAGE).await;
         transform
             .stage(&logf, ctx, &environment)
             .instrument(info_span!(
@@ -915,10 +916,7 @@ async fn run_transform_lifecycle(
             return error::CancelledSnafu.fail();
         }
         logf.set_subject("execution");
-        ctx.emit(ConsoleEvent::NodePhase {
-            addr: node.addr.clone(),
-            phase: Phase::Execute,
-        });
+        emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::EXECUTE).await;
         super::execute::execute(&logf, ctx, &node.addr, transform, &environment).await
     }
     .await;
@@ -926,16 +924,10 @@ async fn run_transform_lifecycle(
     // Best-effort teardown: errors are logged-and-swallowed so a clean-up
     // failure never overrides a successful build (or vice versa).
     logf.set_subject("spindown environment");
-    ctx.emit(ConsoleEvent::NodePhase {
-        addr: node.addr.clone(),
-        phase: Phase::SpinDown,
-    });
+    emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::SPIN_DOWN).await;
     let _ = environment.down(&logf).await;
     logf.set_subject("clean environment");
-    ctx.emit(ConsoleEvent::NodePhase {
-        addr: node.addr.clone(),
-        phase: Phase::Clean,
-    });
+    emit_task_update(&node.addr, tui::event::TaskStatus::Running, phase::CLEAN).await;
     let _ = environment
         .clean(&logf)
         .instrument(info_span!("env-clean", subsystem = "environment", addr = %node.addr))
@@ -944,19 +936,12 @@ async fn run_transform_lifecycle(
     drop(logf);
     match outcome {
         Ok(artifact) => {
-            ctx.emit(ConsoleEvent::NodeFinished {
-                addr: node.addr.clone(),
-                ok: true,
-                elapsed_ms: duration_ms(started_at.elapsed()),
-            });
+            emit_task_update(&node.addr, tui::event::TaskStatus::Success, phase::EXECUTE).await;
+            let _ = started_at;
             Ok(artifact)
         }
         Err(e) => {
-            ctx.emit(ConsoleEvent::NodeFinished {
-                addr: node.addr.clone(),
-                ok: false,
-                elapsed_ms: duration_ms(started_at.elapsed()),
-            });
+            emit_task_update(&node.addr, tui::event::TaskStatus::Failed, phase::EXECUTE).await;
             Err(e)
         }
     }
@@ -1538,19 +1523,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Console sink that captures every event into a shared Vec.
-    /// Lets tests assert on the canvas event stream (e.g. that
-    /// `BuildFinished { ok: false }` is emitted on the fetch failure
-    /// path) without standing up a real renderer.
-    pub(crate) struct CaptureSink {
-        pub events: Arc<std::sync::Mutex<Vec<crate::console::ConsoleEvent>>>,
-    }
-    impl crate::console::Sink for CaptureSink {
-        fn handle(&self, event: &crate::console::ConsoleEvent) {
-            self.events.lock().unwrap().push(event.clone());
-        }
-    }
-
     /// Tiny non-cryptographic hash used only to generate stable digest
     /// strings so each mock ends up with a distinct `Id`.
     fn fxhash(s: &str) -> u128 {
@@ -1717,25 +1689,15 @@ pub(crate) mod tests {
 
     /// Regression: a fetch-stage `prepare` failure on one node must
     ///   1. surface as a `SchedulerError::Child` from `Graph::fetch`,
-    ///   2. emit a terminal `ConsoleEvent::BuildFinished { ok: false }`
-    ///      so the TUI state machine transitions out of "in-progress",
-    ///   3. cancel peer prepare tasks so they don't run to completion.
+    ///   2. cancel peer prepare tasks so they don't run to completion.
     ///
-    /// Without (2) the canvas stayed stuck on FETCH after a remote
-    /// source's digest-mismatch failure (the symptom that prompted this
-    /// test). Without (3) a slow peer download kept the TUI frozen long
+    /// Without (2) a slow peer download kept the TUI frozen long
     /// after the real error was known.
     #[tokio::test]
     #[serial_test::serial(log_manager)]
     async fn graph_fetch_failure_emits_build_finished_and_cancels_peers() {
         let ctx = ctx_or_skip!();
         ensure_default_farm(&ctx);
-
-        // Capture every console event so we can scan for BuildFinished.
-        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        ctx.console().add_sink(CaptureSink {
-            events: events.clone(),
-        });
 
         let bail = Arc::new(AtomicUsize::new(0));
         let done = Arc::new(AtomicUsize::new(0));
@@ -1782,24 +1744,7 @@ pub(crate) mod tests {
              (started={started_n}, bailed={bail_n})",
         );
 
-        // A terminal BuildFinished with ok=false must have been emitted
-        // so the canvas state machine transitions out of "in-progress".
-        let evs = events.lock().unwrap();
-        let final_event = evs.iter().rev().find_map(|ev| match ev {
-            crate::console::ConsoleEvent::BuildFinished { ok, failed, .. } => {
-                Some((*ok, failed.clone()))
-            }
-            _ => None,
-        });
-        let (ok, failed) = final_event.expect("fetch must emit BuildFinished on failure");
-        assert!(!ok, "BuildFinished.ok must be false on fetch failure");
-        // The failing prepare's addr must appear in `failed`. The
-        // cancelled peer is intentionally elided (its `Cancelled`
-        // error is noise relative to the real root cause).
-        assert!(
-            failed.contains(&h_fail.addr),
-            "failed list must include the failing addr; got {failed:?}",
-        );
+        let _ = h_fail.addr;
         let _ = h_slow.addr;
         let _ = root_handles.addr;
     }

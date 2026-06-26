@@ -72,12 +72,9 @@ impl SourceImpl for RemoteSource {
     async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
         let id = self.get_unique_id().await?;
         let id_s = id.to_string();
-        info!(
-            subsystem = "source",
+        edo::ui_info!(
             component = "remote",
-            op = "fetch",
-            id = %id,
-            url = %self.url,
+            id = id,
             "fetching {}",
             self.url
         );

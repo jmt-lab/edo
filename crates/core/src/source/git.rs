@@ -58,13 +58,9 @@ impl SourceImpl for GitSource {
     async fn fetch(&self, log: &Log, storage: &Storage) -> SourceResult<Artifact> {
         let id = self.get_unique_id().await?;
         let id_s = id.to_string();
-        info!(
-            subsystem = "source",
+        edo::ui_info!(
             component = "git",
-            op = "fetch",
-            id = %id,
-            url = %self.url,
-            reference = %self.reference,
+            id = id,
             "cloning {}@{}",
             self.url,
             self.reference

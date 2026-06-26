@@ -6,7 +6,6 @@
 //! [`Context`](super::Context).
 
 use super::{Addr, ContextResult, Log, LogManager, error};
-use crate::console::{Console, ConsoleEvent};
 use crate::{
     context::Config,
     environment::{Environment, Farm},
@@ -61,7 +60,6 @@ impl IdCache {
 #[derive(Clone)]
 pub struct Handle {
     log: LogManager,
-    console: Console,
     config: Config,
     storage: Storage,
     transforms: HashMap<Addr, Transform>,
@@ -82,7 +80,6 @@ impl Handle {
     /// Creates a new `Handle` with the given components.
     pub fn new(
         log: LogManager,
-        console: Console,
         config: Config,
         storage: Storage,
         transforms: HashMap<Addr, Transform>,
@@ -91,7 +88,6 @@ impl Handle {
     ) -> Self {
         Self {
             log,
-            console,
             config,
             storage,
             transforms,
@@ -133,14 +129,9 @@ impl Handle {
         &self.log
     }
 
-    /// Returns a reference to the build-event console.
-    pub fn console(&self) -> &Console {
-        &self.console
-    }
-
-    /// Convenience: emit a [`ConsoleEvent`] through the build console.
-    pub fn emit(&self, event: ConsoleEvent) {
-        self.console.emit(event);
+    /// Returns the global tui console, if installed.
+    pub fn console(&self) -> Option<&'static crate::tui::Console> {
+        crate::tui::Console::global()
     }
 
     /// Returns a reference to the storage backend.
@@ -215,7 +206,6 @@ mod tests {
 
         let handle = Handle::new(
             log_mgr,
-            crate::console::Console::new(),
             Config::default(),
             storage,
             HashMap::new(),
@@ -239,7 +229,6 @@ mod tests {
 
         let handle = Handle::new(
             log_mgr.clone(),
-            crate::console::Console::new(),
             Config::default(),
             storage,
             HashMap::new(),

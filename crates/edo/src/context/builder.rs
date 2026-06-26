@@ -144,12 +144,9 @@ impl Project {
             if lock.digest() == digest {
                 locked_reused = true;
                 needs_resolution = false;
-                info!(
-                    subsystem = "context",
+                crate::ui_info!(
                     component = "project",
-                    op = "lock-reuse",
-                    digest = %digest,
-                    "no changes detected in project, reusing lock resolution file"
+                    "no changes detected in project (digest {digest}), reusing lock resolution file"
                 );
                 // Collect first to release the borrow on `self.schema`
                 // before mutating it via `add_source`.
@@ -164,13 +161,11 @@ impl Project {
             } else if error_on_lock {
                 return error::DependencyChangeSnafu {}.fail();
             } else {
-                info!(
-                    subsystem = "context",
+                crate::ui_info!(
                     component = "project",
-                    op = "lock-stale",
-                    old_digest = %lock.digest(),
-                    new_digest = %digest,
-                    "project changed since lockfile was written; re-resolving"
+                    "project changed since lockfile was written ({} -> {}); re-resolving",
+                    lock.digest(),
+                    digest
                 );
             }
         }
@@ -214,14 +209,9 @@ impl Project {
             let mut lock = Lock::new(digest);
 
             for (addr, (vendor_name, name, version)) in resolved.iter() {
-                info!(
-                    subsystem = "context",
+                crate::ui_info!(
                     component = "project",
-                    op = "resolve",
-                    addr = %addr,
-                    name = %name,
-                    version = %version,
-                    vendor = %vendor_name,
+                    id = addr,
                     "resolved {addr} to {name}@{version} from vendor {vendor_name}"
                 );
                 let vendor = vendors
@@ -269,15 +259,20 @@ impl Project {
         // header, JSONL log, and simple sink all have a single record of
         // project shape. Sequenced after registration so counts reflect
         // post-resolution state.
-        ctx.emit(crate::console::ConsoleEvent::ProjectLoaded {
-            root: self.project_path.display().to_string(),
-            transforms: self.schema.transforms().len(),
-            sources: self.schema.sources().len(),
-            vendors: self.schema.vendors().len(),
-            farms: self.schema.environments().len(),
-            caches: cache_count,
-            locked: locked_reused,
-        });
+        if let Some(c) = crate::tui::Console::global() {
+            c.emit_summary(
+                self.project_path.as_path(),
+                self.schema.transforms().len(),
+                self.schema.sources().len(),
+                self.schema.environments().len(),
+                locked_reused,
+            )
+            .await;
+            // Vendors and caches are not currently represented in the
+            // tui Summary event; surface them as info diagnostics so
+            // they still appear in the log.
+            let _ = cache_count;
+        }
 
         Ok(())
     }

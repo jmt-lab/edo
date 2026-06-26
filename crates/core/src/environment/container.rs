@@ -161,13 +161,11 @@ impl FromElement for ContainerFarm {
         };
         if config.runtime.is_none() {
             let (runtime, cli) = detect_runtime().context(error::NoRuntimeSnafu)?;
-            info!(
-                subsystem = "environment",
+            edo::ui_info!(
                 component = "container",
-                op = "runtime-detect",
-                cli = ?cli,
-                runtime = %runtime,
-                "found container runtime"
+                "found container runtime {} at {:?}",
+                runtime,
+                cli
             );
             config.runtime = Some(runtime.to_string());
             // Only fill `cli` from autodetect if the user didn't override it,
@@ -284,11 +282,9 @@ impl FarmImpl for ContainerFarm {
                 &HashMap::new(),
             )
             .context(error::RuntimeSnafu)?;
-            info!(
-                subsystem = "environment",
+            edo::ui_info!(
                 component = "container",
-                op = "image-load",
-                id = %artifact_id,
+                id = artifact_id,
                 "image loaded into container runtime"
             );
             remove_file(&path).await.context(error::IoSnafu)?;

@@ -5,18 +5,18 @@
 
 use super::{Result, error};
 use crate::{
-    console::{PromptChoice, PromptRequest},
     context::{Handle, Log},
     environment::Environment,
     storage::Artifact,
     transform::{Transform, TransformStatus},
+    tui::{self, PromptChoice, PromptRequest},
 };
 use std::io;
 
 /// Executes a transform with interactive error recovery.
 ///
 /// Runs the given transform within the provided environment. On failure,
-/// drives the failure prompt via [`crate::console::Console::prompt`].
+/// drives the failure prompt via [`crate::tui::Console::prompt`].
 /// On success, uploads the resulting artifact to the build cache.
 pub async fn execute(
     log: &Log,
@@ -39,10 +39,9 @@ pub async fn execute(
             // If the attempt failed for any reason we need to prompt the user what
             // we should do about it.
             TransformStatus::Retryable(log_file, e) | TransformStatus::Failed(log_file, e) => {
-                error!(
-                    subsystem = "transform",
-                    op = "failed",
-                    addr = %addr,
+                crate::ui_error!(
+                    component = "transform",
+                    id = addr,
                     "transformation failed: {}",
                     e.to_string()
                 );
@@ -72,7 +71,10 @@ pub async fn execute(
                     allow_shell,
                     shell: shell_callback,
                 };
-                let choice = ctx.console().prompt(request).await;
+                let choice = match tui::Console::global() {
+                    Some(c) => c.prompt(request).await,
+                    None => PromptChoice::Quit,
+                };
                 match choice {
                     PromptChoice::Retry if allow_retry => {
                         continue 'transform;
@@ -84,11 +86,15 @@ pub async fn execute(
                         // shutdown race, second prompt rejected) we
                         // emit an explicit diagnostic instead of
                         // silently downgrading to abort (P1).
-                        ctx.console().emit(crate::console::ConsoleEvent::diag(
-                            crate::console::event::Severity::Warn,
-                            "transform",
-                            format!("{addr}: retry not available for this failure; aborting"),
-                        ));
+                        if let Some(c) = tui::Console::global() {
+                            c.emit_diagnostic(
+                                "transform",
+                                Some(addr.to_string()),
+                                tui::event::Severity::Warn,
+                                &format!("{addr}: retry not available for this failure; aborting"),
+                            )
+                            .await;
+                        }
                         ctx.cancellation().cancel();
                         result = error::PassthroughSnafu {
                             message: e.to_string(),
