@@ -13,6 +13,7 @@ use super::lock::Lock;
 use super::{ContextResult as Result, error};
 use crate::context::schema::Schema;
 use crate::source::{Dependency, Resolver};
+use sha2::{Digest, Sha256};
 use snafu::{OptionExt, ResultExt};
 use std::collections::HashMap;
 use std::fs::{File, read_dir};
@@ -29,6 +30,17 @@ pub struct Project {
 }
 
 impl Project {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            project_path: path.as_ref().to_path_buf(),
+            schema: Schema::default(),
+        }
+    }
+
+    pub fn schema_mut(&mut self) -> &mut Schema {
+        &mut self.schema
+    }
+
     /// Computes a stable digest over the schema's `requires` table.
     ///
     /// Used to invalidate `edo.lock.json` when dependency declarations
@@ -36,11 +48,11 @@ impl Project {
     /// configuration that don't affect resolution shouldn't invalidate
     /// resolved versions.
     fn calculate_digest(&self) -> Result<String> {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = Sha256::new();
         let bytes = serde_json::to_vec(self.schema.requires()).context(error::SerializeSnafu)?;
         hasher.update(&bytes);
         let digest = hasher.finalize();
-        Ok(base16::encode_lower(digest.as_bytes()))
+        Ok(base16::encode_lower(digest.as_slice()))
     }
 
     /// Loads all `edo.toml` files under `path`, resolves dependencies, and
@@ -104,18 +116,39 @@ impl Project {
         }
 
         // Check for an existing lockfile.
+        //
+        // There are three cases to consider:
+        //   1. Lockfile present and digest matches → reuse the resolved
+        //      addresses verbatim (no network, no resolver).
+        //   2. Lockfile present, digest mismatches, `error_on_lock=true` →
+        //      bail so CI / `--locked` builds don't silently drift.
+        //   3. Lockfile absent, OR lockfile present with a stale digest and
+        //      `error_on_lock=false` (e.g. `edo update`) → run the
+        //      resolver and rewrite `edo.lock.json`.
         let lock_file = self.project_path.join("edo.lock.json");
         let lock = if lock_file.exists() {
             let mut file = File::open(&lock_file).context(error::IoSnafu)?;
             let lock: Lock = serde_json::from_reader(&mut file).context(error::SerializeSnafu)?;
-            // If digests match, reuse the existing resolution rather than
-            // re-running the resolver.
             if lock.digest() == digest {
-                info!(target: "project", "no changes detected in project, reusing lock resolution file");
+                info!(
+                    subsystem = "context",
+                    component = "project",
+                    op = "lock-reuse",
+                    digest = %digest,
+                    "no changes detected in project, reusing lock resolution file"
+                );
                 Some(lock)
             } else if error_on_lock {
                 return error::DependencyChangeSnafu {}.fail();
             } else {
+                info!(
+                    subsystem = "context",
+                    component = "project",
+                    op = "lock-stale",
+                    old_digest = %lock.digest(),
+                    new_digest = %digest,
+                    "project changed since lockfile was written; re-resolving"
+                );
                 None
             }
         } else {
@@ -131,6 +164,8 @@ impl Project {
                 self.schema.add_source(&addr, resolved);
             }
         } else {
+            // Build a resolver from the registered vendors and resolve
+            // every `[requires.*]` entry, then (re)write the lockfile.
             let mut resolver = Resolver::default();
             let mut vendors = HashMap::new();
             for (addr, element) in self.schema.vendors() {

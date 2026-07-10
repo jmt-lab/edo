@@ -20,13 +20,48 @@ use uuid::Uuid;
 use which::which;
 
 /// Configuration for the container runtime (e.g. which CLI binary to use).
-#[derive(serde::Deserialize, Debug, Clone, Default)]
+///
+/// All fields are optional; an unset `runtime` triggers autodetection
+/// (`podman` -> `finch` -> `docker`), and an unset `cli` is resolved via
+/// `which(runtime)`.
+#[derive(serde::Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ContainerConfig {
+    #[serde(default)]
     runtime: Option<String>,
+    #[serde(default)]
     cli: Option<PathBuf>,
     #[serde(default)]
     network: bool,
+    /// Maximum number of processes/threads the container may spawn.
+    ///
+    /// Maps to `--pids-limit`. `-1` (the default) means unlimited; rootless
+    /// runtimes otherwise inherit a low cap (often 2048) which fork-heavy
+    /// builds (Go, Kubernetes) trivially exhaust with EAGAIN from `fork(2)`.
+    /// Set to `None` to omit the flag and use the runtime's default.
+    #[serde(default = "default_pids_limit")]
+    pids_limit: Option<i64>,
+    /// Per-container ulimits, each formatted as `name=soft[:hard]` and passed
+    /// through verbatim as repeated `--ulimit` flags (e.g. `"nproc=65535"`,
+    /// `"nofile=1048576"`). Defaults to empty (runtime defaults apply).
+    #[serde(default)]
+    ulimits: Vec<String>,
+}
+
+fn default_pids_limit() -> Option<i64> {
+    Some(-1)
+}
+
+impl Default for ContainerConfig {
+    fn default() -> Self {
+        Self {
+            runtime: None,
+            cli: None,
+            network: false,
+            pids_limit: default_pids_limit(),
+            ulimits: Vec::new(),
+        }
+    }
 }
 
 /// Options for a Container environment
@@ -49,6 +84,8 @@ fn default_user() -> String {
 struct ResolvedContainerConfig {
     cli: PathBuf,
     network: bool,
+    pids_limit: Option<i64>,
+    ulimits: Vec<String>,
 }
 
 impl ContainerConfig {
@@ -79,6 +116,8 @@ impl ContainerConfig {
         Ok(ResolvedContainerConfig {
             cli: self.cli.context(error::NoRuntimeSnafu)?,
             network: self.network,
+            pids_limit: self.pids_limit,
+            ulimits: self.ulimits,
         })
     }
 }
@@ -296,6 +335,18 @@ impl EnvironmentImpl for Container {
             ];
             if !self.config.network {
                 args.push("--network=none".to_string());
+            }
+            // Heavy builds (Kubernetes' Go toolchain, parallel rpmbuild, etc.)
+            // can blow past the rootless default `pids.max` and fail with
+            // `fork/exec ...: resource temporarily unavailable`. Default to
+            // unlimited; honour an explicit override if the user set one.
+            if let Some(limit) = self.config.pids_limit {
+                args.push("--pids-limit".to_string());
+                args.push(limit.to_string());
+            }
+            for ulimit in &self.config.ulimits {
+                args.push("--ulimit".to_string());
+                args.push(ulimit.clone());
             }
             if self.user == "root" {
                 args.push("--mount".to_string());
@@ -650,6 +701,32 @@ mod tests {
     fn user_defaults_to_root() {
         assert_eq!(options(json!({})).user, "root");
         assert_eq!(options(json!({"user": "builder"})).user, "builder");
+    }
+
+    #[test]
+    fn resource_limits_survive_resolution() {
+        for config in [
+            ContainerConfig::default(),
+            serde_json::from_value(json!({})).unwrap(),
+        ] {
+            let resolved = config
+                .resolve(&options(json!({})), |runtime| Some(PathBuf::from(runtime)))
+                .unwrap();
+            assert_eq!(resolved.pids_limit, Some(-1));
+            assert!(resolved.ulimits.is_empty());
+        }
+        for limit in [json!(4096), json!(null)] {
+            let config: ContainerConfig = serde_json::from_value(json!({
+                "pids_limit": limit,
+                "ulimits": ["nofile=65536:65536"]
+            }))
+            .unwrap();
+            let resolved = config
+                .resolve(&options(json!({})), |runtime| Some(PathBuf::from(runtime)))
+                .unwrap();
+            assert_eq!(resolved.pids_limit, limit.as_i64());
+            assert_eq!(resolved.ulimits, ["nofile=65536:65536"]);
+        }
     }
 
     #[test]
