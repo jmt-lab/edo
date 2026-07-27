@@ -233,8 +233,7 @@ impl TransformImpl for GoVendorTransform {
                         // Invoke via `env` so extra variables (e.g. GO_MAJOR)
                         // are exported for the `go` process. Keys are already
                         // ordered thanks to BTreeMap.
-                        let mut args: Vec<String> =
-                            Vec::with_capacity(self.env.len() + 3);
+                        let mut args: Vec<String> = Vec::with_capacity(self.env.len() + 3);
                         for (k, v) in self.env.iter() {
                             args.push(format!("{k}={v}"));
                         }

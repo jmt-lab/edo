@@ -10,7 +10,6 @@ keywords   = ["edo"]
 [dependencies]
 astral-tokio-tar  = { workspace = true }
 async-compression = { workspace = true }
-bon               = { workspace = true }
 clap              = { workspace = true }
 edo               = { path = "../edo" }
 edo-core          = { path = "../core" }
@@ -19,4 +18,3 @@ mockall           = { workspace = true }
 semver            = { workspace = true }
 snafu             = { workspace = true }
 tokio             = { workspace = true }
-tracing           = { workspace = true }
