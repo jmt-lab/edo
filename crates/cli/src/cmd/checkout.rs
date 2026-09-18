@@ -92,7 +92,7 @@ impl Checkout {
                         .config()
                         .path_hint_for(layer.digest())
                         .cloned()
-                        .unwrap_or_else(|| PathBuf::from(layer.digest().digest()));
+                        .unwrap_or_else(|| layer.digest().as_path());
                     let dest = self.output.join(filename);
                     if let Some(parent) = dest.parent() {
                         create_dir_all(parent).await.context(error::IoSnafu)?;
