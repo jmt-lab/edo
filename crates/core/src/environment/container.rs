@@ -284,6 +284,20 @@ pub struct Container {
 unsafe impl Send for Container {}
 unsafe impl Sync for Container {}
 
+impl Container {
+    fn local_path(&self, path: &Path) -> PathBuf {
+        if self.user == "root"
+            && let Ok(stripped) = path.strip_prefix("/root")
+        {
+            stripped.to_path_buf()
+        } else if let Ok(stripped) = path.strip_prefix(format!("/home/{}", self.user)) {
+            stripped.to_path_buf()
+        } else {
+            path.to_path_buf()
+        }
+    }
+}
+
 #[async_trait]
 impl EnvironmentImpl for Container {
     async fn expand(&self, path: &Path) -> EnvResult<PathBuf> {
@@ -422,6 +436,7 @@ impl EnvironmentImpl for Container {
     }
 
     async fn create_dir(&self, path: &Path) -> EnvResult<()> {
+        let path = self.local_path(&path);
         let path = self.path.join(path);
         trace!(component = "environment", type = "container", "creating directory at {}", path.display());
         create_dir_all(path)
@@ -431,13 +446,14 @@ impl EnvironmentImpl for Container {
     }
 
     async fn write_bytes(&self, path: &Path, buffer: &[u8]) -> EnvResult<()> {
-        let file_path = self.path.join(path);
-        if let Some(parent) = file_path.parent()
-            && !parent.exists()
-        {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .context(error::CreateDirectorySnafu)?;
+        let path = self.local_path(path);
+        let file_path = self.path.join(&path);
+        if let Some(parent) = file_path.parent() {
+            if !parent.exists() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .context(error::CreateDirectorySnafu)?;
+            }
         }
         trace!(component = "environment", type = "container", "writing contents to file at {}", file_path.display());
         tokio::fs::write(&file_path, buffer)
@@ -447,13 +463,14 @@ impl EnvironmentImpl for Container {
     }
 
     async fn write_stream(&self, path: &Path, mut reader: Reader) -> EnvResult<()> {
-        let file_path = self.path.join(path);
-        if let Some(parent) = file_path.parent()
-            && !parent.exists()
-        {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .context(error::CreateDirectorySnafu)?;
+        let path = self.local_path(path);
+        let file_path = self.path.join(&path);
+        if let Some(parent) = file_path.parent() {
+            if !parent.exists() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .context(error::CreateDirectorySnafu)?;
+            }
         }
         trace!(component = "environment", type = "container", "writing contents to file at {}", file_path.display());
         let mut file = File::create(&file_path)
@@ -471,7 +488,8 @@ impl EnvironmentImpl for Container {
         media_type: &MediaType,
         reader: Reader,
     ) -> EnvResult<()> {
-        let file_path = self.path.join(path);
+        let path = self.local_path(path);
+        let file_path = self.path.join(&path);
         if !file_path.exists() {
             tokio::fs::create_dir_all(&file_path)
                 .await
@@ -497,7 +515,8 @@ impl EnvironmentImpl for Container {
     }
 
     async fn read_stream(&self, path: &Path, mut writer: Writer) -> EnvResult<()> {
-        let file_path = self.path.join(path);
+        let path = self.local_path(path);
+        let file_path = self.path.join(&path);
         ensure!(
             file_path.exists(),
             error::NotFoundSnafu {
@@ -523,7 +542,8 @@ impl EnvironmentImpl for Container {
     }
 
     async fn read_bytes(&self, path: &Path) -> EnvResult<Vec<u8>> {
-        let file_path = self.path.join(path);
+        let path = self.local_path(path);
+        let file_path = self.path.join(&path);
         ensure!(
             file_path.exists(),
             error::NotFoundSnafu {
